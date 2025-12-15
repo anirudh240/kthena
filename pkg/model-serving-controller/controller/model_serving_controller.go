@@ -728,7 +728,7 @@ func (c *ModelServingController) manageServingGroupRollingUpdate(ctx context.Con
 		if c.isServingGroupOutdated(servingGroupList[i], mi.Namespace, revision) {
 			// target ServingGroup is not the latest version, needs to be updated
 			klog.V(2).Infof("ServingGroup %s will be terminated for update", servingGroupList[i].Name)
-			return c.DeleteServingGroup(ctx, mi, servingGroupList[i].Name)
+			return c.deleteServingGroup(ctx, mi, servingGroupList[i].Name)
 		}
 		if servingGroupList[i].Status != datastore.ServingGroupRunning {
 			// target ServingGroup is the latest version, but not running. We need to wait for the status to change to running.
@@ -842,13 +842,13 @@ func (c *ModelServingController) handleDeletedPod(mi *workloadv1alpha1.ModelServ
 	switch mi.Spec.RecoveryPolicy {
 	case workloadv1alpha1.ServingGroupRecreate:
 		// Rebuild the entire ServingGroup directly
-		if err := c.DeleteServingGroup(context.TODO(), mi, servingGroupName); err != nil {
+		if err := c.deleteServingGroup(context.TODO(), mi, servingGroupName); err != nil {
 			klog.Errorf("failed to delete ServingGroup %s: %v", servingGroupName, err)
 		}
 	case workloadv1alpha1.RoleRecreate:
 		// If Rolling update in RoleRecreate mode, requires re-entering the queue during the pod delete event.
 		if c.store.GetServingGroupStatus(utils.GetNamespaceName(mi), servingGroupName) == datastore.ServingGroupDeleting {
-			if err := c.DeleteServingGroup(context.TODO(), mi, servingGroupName); err != nil {
+			if err := c.deleteServingGroup(context.TODO(), mi, servingGroupName); err != nil {
 				klog.Errorf("failed to delete ServingGroup %s: %v", servingGroupName, err)
 			}
 			return nil
@@ -1119,7 +1119,7 @@ func (c *ModelServingController) scaleDownServingGroups(ctx context.Context, mi 
 
 	var err []error
 	for i := len(groupScores) - 1; i >= expectedCount; i-- {
-		if e := c.DeleteServingGroup(ctx, mi, groupScores[i].Name); e != nil {
+		if e := c.deleteServingGroup(ctx, mi, groupScores[i].Name); e != nil {
 			err = append(err, e)
 		}
 	}
@@ -1179,14 +1179,19 @@ func (c *ModelServingController) CreatePodByRole(ctx context.Context, role workl
 	return nil
 }
 
-func (c *ModelServingController) DeleteServingGroup(ctx context.Context, mi *workloadv1alpha1.ModelServing, servingGroupName string) error {
-	if err := c.gangManager.DeletePodGroup(ctx, mi, servingGroupName); err != nil {
-		return fmt.Errorf("failed to delete PodGroup for ServingGroup %s: %v", servingGroupName, err)
+func (c *ModelServingController) deleteServingGroup(ctx context.Context, mi *workloadv1alpha1.ModelServing, servingGroupName string) error {
+	status := c.store.GetServingGroupStatus(utils.GetNamespaceName(mi), servingGroupName)
+	if status == datastore.ServingGroupNotFound {
+		return nil
 	}
 
 	if err := c.store.UpdateServingGroupStatus(utils.GetNamespaceName(mi), servingGroupName, datastore.ServingGroupDeleting); err != nil {
 		klog.ErrorS(err, "Failed to update ServingGroup status", "namespace", mi.Namespace, "servingGroup", servingGroupName)
 		return err
+	}
+
+	if err := c.gangManager.DeletePodGroup(ctx, mi, servingGroupName); err != nil {
+		return fmt.Errorf("failed to delete PodGroup for ServingGroup %s: %v", servingGroupName, err)
 	}
 
 	selector := labels.SelectorFromSet(map[string]string{
@@ -1215,6 +1220,8 @@ func (c *ModelServingController) DeleteServingGroup(ctx context.Context, mi *wor
 	if c.isServingGroupDeleted(mi, servingGroupName) {
 		klog.V(2).Infof("ServingGroup %s has been deleted", servingGroupName)
 		c.store.DeleteServingGroup(utils.GetNamespaceName(mi), servingGroupName)
+		// this is needed when a pod is deleted accidently, and the ServingGroup is deleted completely
+		// and the controller has no chance supplement it.
 		c.enqueueModelServing(mi)
 	}
 	return nil
