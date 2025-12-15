@@ -31,7 +31,8 @@ import (
 
 const (
 	// DefaultRouterURL is the default URL for the router service via port-forward
-	DefaultRouterURL = "http://localhost:80/v1/chat/completions"
+	// Use 127.0.0.1 instead of localhost to avoid IPv6 resolution issues in CI environments
+	DefaultRouterURL = "http://127.0.0.1:80/v1/chat/completions"
 )
 
 // ChatMessage represents a chat message in the request

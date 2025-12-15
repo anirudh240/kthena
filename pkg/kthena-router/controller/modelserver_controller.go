@@ -209,6 +209,15 @@ func (c *ModelServerController) syncModelServerHandler(key string) error {
 	}
 
 	_ = c.store.AddOrUpdateModelServer(ms, pods)
+
+	// Re-enqueue all matching pods to ensure they are associated with this ModelServer
+	// This handles the case where pods became ready before the ModelServer was synced
+	for _, pod := range podList {
+		if isPodReady(pod) {
+			c.enqueuePod(pod)
+		}
+	}
+
 	return nil
 }
 
