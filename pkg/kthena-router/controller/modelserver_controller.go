@@ -235,26 +235,9 @@ func (c *ModelServerController) syncModelServerHandler(key string) error {
 			continue
 		}
 
-		// Find all ModelServers that match this pod
-		modelServers, err := c.modelServerLister.ModelServers(pod.Namespace).List(labels.Everything())
-		if err != nil {
-			klog.Errorf("failed to list ModelServers for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-			continue
-		}
-
-		servers := []*aiv1alpha1.ModelServer{}
-		for _, item := range modelServers {
-			selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: item.Spec.WorkloadSelector.MatchLabels})
-			if err != nil || !selector.Matches(labels.Set(pod.Labels)) {
-				continue
-			}
-			servers = append(servers, item)
-		}
-
-		if len(servers) > 0 {
-			if err := c.store.AddOrUpdatePod(pod, servers); err != nil {
-				klog.Errorf("failed to add or update pod %s/%s in data store: %v", pod.Namespace, pod.Name, err)
-			}
+		// Find all ModelServers that match this pod and update the store
+		if err := c.addOrUpdatePod(pod); err != nil {
+			klog.Errorf("failed to add or update pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 	}
 
@@ -282,9 +265,15 @@ func (c *ModelServerController) syncPodHandler(key string) error {
 		return nil
 	}
 
+	return c.addOrUpdatePod(pod)
+}
+
+// addOrUpdatePod finds all ModelServers that match the given pod
+// and adds or updates the pod-server binding in the data store
+func (c *ModelServerController) addOrUpdatePod(pod *corev1.Pod) error {
 	modelServers, err := c.modelServerLister.ModelServers(pod.Namespace).List(labels.Everything())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list ModelServers for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
 
 	servers := []*aiv1alpha1.ModelServer{}
@@ -296,12 +285,10 @@ func (c *ModelServerController) syncPodHandler(key string) error {
 		servers = append(servers, item)
 	}
 
-	if len(servers) == 0 {
-		return nil
-	}
-
-	if err := c.store.AddOrUpdatePod(pod, servers); err != nil {
-		return fmt.Errorf("failed to add or update pod in data store: %v", name)
+	if len(servers) > 0 {
+		if err := c.store.AddOrUpdatePod(pod, servers); err != nil {
+			return fmt.Errorf("failed to add or update pod %s/%s in data store: %v", pod.Namespace, pod.Name, err)
+		}
 	}
 
 	return nil
