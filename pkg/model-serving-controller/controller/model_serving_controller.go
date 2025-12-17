@@ -482,6 +482,7 @@ func (c *ModelServingController) manageServingGroupReplicas(ctx context.Context,
 			}
 		}
 
+		// Note: in case the role is updated, we need to update pod groups as well.
 		// update pod group after scaling down, so that we do not need to update pod group for deleting serving groups
 		servingGroupList, err := c.store.GetServingGroupByModelServing(utils.GetNamespaceName(mi))
 		if err != nil && !errors.Is(err, datastore.ErrServingGroupNotFound) {

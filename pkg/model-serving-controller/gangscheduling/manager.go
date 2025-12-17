@@ -66,7 +66,6 @@ func (m *Manager) CreateOrUpdatePodGroup(ctx context.Context, mi *workloadv1alph
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get PodGroup %s: %v", pgName, err)
 		}
-		// PodGroup not found; caller may not have created it yet. Best-effort create.
 		return m.createPodGroup(ctx, mi, pgName)
 	}
 
@@ -114,7 +113,6 @@ func (m *Manager) createPodGroup(ctx context.Context, mi *workloadv1alpha1.Model
 
 	_, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Create(ctx, podGroup, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
-		fmt.Printf("failed to create PodGroup %s: %v\n", podGroup.Name, err)
 		return err
 	}
 
@@ -248,7 +246,6 @@ func (m *Manager) updatePodGroupIfNeeded(ctx context.Context, existing *scheduli
 	if hasPodGroupChanged(existing, updated) {
 		_, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Update(ctx, updated, metav1.UpdateOptions{})
 		if err != nil {
-			fmt.Printf("failed to update PodGroup %s: %v\n", existing.Name, err)
 			return err
 		}
 		klog.V(2).Infof("Updated PodGroup %s for group-level gang scheduling", existing.Name)

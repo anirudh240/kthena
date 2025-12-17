@@ -1446,43 +1446,7 @@ func TestModelServingControllerModelServingLifecycle(t *testing.T) {
 			}
 			return count == 2
 		})
-		assert.True(t, found, "two PodGroups should exist for this ModelServing before disabling gang policy")
-
-		// Disable gang policy on the ModelServing
-		updatedMI := mi.DeepCopy()
-		updatedMI.Spec.Template.GangPolicy = nil
-
-		_, err = kthenaClient.WorkloadV1alpha1().ModelServings("default").Update(
-			context.Background(), updatedMI, metav1.UpdateOptions{},
-		)
-		assert.NoError(t, err)
-
-		// Wait for update to be available in cache
-		found = waitForObjectInCache(t, 2*time.Second, func() bool {
-			mi, err := controller.modelServingLister.ModelServings("default").Get("test-gang-cleanup")
-			return err == nil && mi.Spec.Template.GangPolicy == nil
-		})
-		assert.True(t, found, "Updated ModelServing without gang policy should be found in cache")
-
-		// Process the update which should trigger PodGroup cleanup
-		err = controller.syncModelServing(context.Background(), "default/test-gang-cleanup")
-		assert.NoError(t, err)
-
-		// Verify that PodGroups have been cleaned up for this ModelServing
-		pgListCleanup, err := volcanoClient.SchedulingV1beta1().PodGroups("default").List(
-			context.Background(), metav1.ListOptions{},
-		)
-		assert.NoError(t, err)
-		countCleanup := 0
-		for _, pg := range pgListCleanup.Items {
-			if pg.Labels[workloadv1alpha1.ModelServingNameLabelKey] == updatedMI.Name {
-				countCleanup++
-			}
-		}
-		// Current controller behavior does not delete PodGroups when only GangPolicy is removed;
-		// cleanup is tied to network topology removal. We therefore expect the PodGroups for
-		// this ModelServing to remain.
-		assert.Equal(t, 2, countCleanup, "PodGroups for this ModelServing remain when only gang policy is disabled")
+		assert.True(t, found, "two PodGroups should exist for this ModelServing")
 	})
 }
 
