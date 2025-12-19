@@ -150,18 +150,6 @@ processor:
     - "secretData"
 ```
 
-## Documentation Generation with Helm-Docs
-
-We use [helm-docs](https://github.com/norwoodj/helm-docs) to automatically generate Helm chart documentation from our
-`charts/kthena/values.yaml` file.
-
-### Key Benefits
-
-1. **Consistent Formatting**: Generates clean, well-structured documentation tables
-2. **Automated Synchronization**: When integrated into CI/CD pipelines, ensures documentation always reflects the latest
-   `values.yaml` configuration
-3. **Time Efficiency**: Eliminates manual documentation updates, reducing errors and saving development time
-
 ### Troubleshooting
 
 #### Common Issues
@@ -182,15 +170,9 @@ make gen-docs VERBOSE=1
 
 ### Integration with CI/CD
 
-To ensure documentation stays up-to-date, add the documentation generation to your CI pipeline:
+To ensure documentation stays up-to-date, add documentation generation check to your CI pipeline:
 
-```yaml
-- name: Generate API Documentation
-  run: make gen-docs
-
-- name: Check for documentation changes
-  run: git diff --exit-code docs/kthena/docs/api/
-```
+See details in [go-check](../../.github/workflows/go-check.yml)
 
 ### Manual Tool Installation
 
@@ -203,6 +185,29 @@ go install github.com/elastic/crd-ref-docs@v0.2.0
 # Or use the Makefile target
 make crd-ref-docs
 ```
+
+---
+
+## Documentation Generation with Helm-Docs
+
+We use [helm-docs](https://github.com/norwoodj/helm-docs) to automatically generate Helm chart documentation from our
+`charts/kthena/values.yaml` file.
+
+### Generation Scope
+
+generating doc only for `charts/kthena/values.yaml` is the recommended best practice.
+
+- Unified Interface: Users typically deploy the parent chart (kthena) and configure it via its main values.yaml. Documenting this single entry point provides a clear, consolidated reference.
+- Reduced Confusion: Generating separate docs for subcharts (networking, workload) can confuse users about which files they should be editing. The parent chart's values.yaml acts as the public API for the entire system.
+
+We use 'charts/kthena/.helmdocsignore' to control the documentation generation scope.
+
+### Key Benefits
+
+1. **Consistent Formatting**: Generates clean, well-structured documentation tables
+2. **Automated Synchronization**: When integrated into CI/CD pipelines, ensures documentation always reflects the latest
+   `values.yaml` configuration
+3. **Time Efficiency**: Eliminates manual documentation updates, reducing errors and saving development time
 
 ---
 
