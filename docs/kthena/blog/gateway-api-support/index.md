@@ -334,6 +334,10 @@ spec:
   selector:
     matchLabels:
       workload.serving.volcano.sh/model-name: demo
+  endpointPickerRef:
+    name: kthena-demo
+    port:
+      number: 8000
 EOF
 ```
 
