@@ -209,7 +209,7 @@ func (m *Manager) aggregateResources(total *corev1.ResourceList, podSpec *corev1
 	}
 }
 
-// GenerateTaskName generates task name for MinTaskMember
+// GenerateTaskName generates task name
 func (m *Manager) GenerateTaskName(roleName string, roleIndex int) string {
 	return fmt.Sprintf("%s-%d", roleName, roleIndex)
 }
@@ -240,15 +240,14 @@ func (m *Manager) getExistingPodGroups(ctx context.Context, mi *workloadv1alpha1
 // updatePodGroupIfNeeded updates a PodGroup if needed for group-level scheduling
 func (m *Manager) updatePodGroupIfNeeded(ctx context.Context, existing *schedulingv1beta1.PodGroup, mi *workloadv1alpha1.ModelServing) error {
 	// Calculate current requirements
-	minMember, minTaskMember, minResources := m.calculateRequirements(mi, existing.GetName())
+	minMember, minRoleMember, minResources := m.calculateRequirements(mi, existing.GetName())
 
 	updated := existing.DeepCopy()
 	updated.Spec.MinMember = int32(minMember)
-	updated.Spec.MinTaskMember = minTaskMember
 	updated.Spec.MinResources = &minResources
 
 	// Apply network topology policy
-	updated = appendSubGroupPolicy(mi, updated, minTaskMember)
+	updated = appendSubGroupPolicy(mi, updated, minRoleMember)
 
 	if hasPodGroupChanged(existing, updated) {
 		_, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Update(ctx, updated, metav1.UpdateOptions{})
@@ -341,17 +340,29 @@ func neededHandledPodGroupNameList(expectedReplicas int, mi *workloadv1alpha1.Mo
 
 func appendSubGroupPolicy(mi *workloadv1alpha1.ModelServing, podGroup *schedulingv1beta1.PodGroup, minRoleMember map[string]int32) *schedulingv1beta1.PodGroup {
 	subGroupPolicy := make([]schedulingv1beta1.SubGroupPolicySpec, 0, len(minRoleMember))
-	for roleName, subGroupSize := range minRoleMember {
+	for _, role := range mi.Spec.Template.Roles {
+		roleReplicas := int(*role.Replicas)
+		minRoleReplicas := roleReplicas
+
+		if mi.Spec.Template.GangPolicy != nil && mi.Spec.Template.GangPolicy.MinRoleReplicas != nil {
+			if minReplicas, exists := mi.Spec.Template.GangPolicy.MinRoleReplicas[role.Name]; exists {
+				minRoleReplicas = int(minReplicas)
+			}
+		}
+
+		minReplicas := min(minRoleReplicas, roleReplicas)
+		minSubgroupSize := minRoleMember[role.Name]
 		subGroupPolicy = append(subGroupPolicy, schedulingv1beta1.SubGroupPolicySpec{
-			Name: roleName,
+			Name: role.Name,
 			LabelSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					workloadv1alpha1.ModelServingNameLabelKey: mi.Name,
-					workloadv1alpha1.RoleLabelKey:             roleName,
+					workloadv1alpha1.RoleLabelKey:             role.Name,
 				},
 			},
 			MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
-			SubGroupSize:   &subGroupSize,
+			SubGroupSize:   &minSubgroupSize,
+			MinSubGroups:   ptr.To(int32(minReplicas)),
 		})
 	}
 

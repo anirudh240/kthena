@@ -818,3 +818,253 @@ func TestNeededHandledPodGroupNameList(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendSubGroupPolicy(t *testing.T) {
+	// Test cases for appendSubGroupPolicy function
+	tests := []struct {
+		name           string
+		modelServing   *workloadv1alpha1.ModelServing
+		podGroup       *schedulingv1beta1.PodGroup
+		minRoleMember  map[string]int32
+		expectedResult *schedulingv1beta1.PodGroup
+	}{
+		{
+			name: "Basic sub group policy creation",
+			modelServing: &workloadv1alpha1.ModelServing{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-model-serving",
+				},
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Template: workloadv1alpha1.ServingGroup{
+						Roles: []workloadv1alpha1.Role{
+							{
+								Name:     "role1",
+								Replicas: ptr.To(int32(3)),
+							},
+						},
+						GangPolicy: &workloadv1alpha1.GangPolicy{
+							MinRoleReplicas: map[string]int32{
+								"role1": 2,
+							},
+						},
+					},
+				},
+			},
+			podGroup: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{},
+			},
+			minRoleMember: map[string]int32{
+				"role1": 2,
+			},
+			expectedResult: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{
+					SubGroupPolicy: []schedulingv1beta1.SubGroupPolicySpec{
+						{
+							Name: "role1",
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									workloadv1alpha1.ModelServingNameLabelKey: "test-model-serving",
+									workloadv1alpha1.RoleLabelKey:             "role1",
+								},
+							},
+							MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
+							SubGroupSize:   ptr.To(int32(2)),
+							MinSubGroups:   ptr.To(int32(2)),
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Multiple roles with network topology",
+			modelServing: &workloadv1alpha1.ModelServing{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-model-serving",
+				},
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Template: workloadv1alpha1.ServingGroup{
+						Roles: []workloadv1alpha1.Role{
+							{
+								Name:     "role1",
+								Replicas: ptr.To(int32(3)),
+							},
+							{
+								Name:     "role2",
+								Replicas: ptr.To(int32(2)),
+							},
+						},
+						GangPolicy: &workloadv1alpha1.GangPolicy{
+							MinRoleReplicas: map[string]int32{
+								"role1": 2,
+								"role2": 1,
+							},
+						},
+						NetworkTopology: &workloadv1alpha1.NetworkTopology{
+							RolePolicy: &schedulingv1beta1.NetworkTopologySpec{
+								Mode:               "soft",
+								HighestTierAllowed: ptr.To(2),
+							},
+						},
+					},
+				},
+			},
+			podGroup: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{},
+			},
+			minRoleMember: map[string]int32{
+				"role1": 2,
+				"role2": 1,
+			},
+			expectedResult: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{
+					SubGroupPolicy: []schedulingv1beta1.SubGroupPolicySpec{
+						{
+							Name: "role1",
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									workloadv1alpha1.ModelServingNameLabelKey: "test-model-serving",
+									workloadv1alpha1.RoleLabelKey:             "role1",
+								},
+							},
+							MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
+							SubGroupSize:   ptr.To(int32(2)),
+							MinSubGroups:   ptr.To(int32(2)),
+							NetworkTopology: &schedulingv1beta1.NetworkTopologySpec{
+								Mode:               "soft",
+								HighestTierAllowed: ptr.To(2),
+							},
+						},
+						{
+							Name: "role2",
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									workloadv1alpha1.ModelServingNameLabelKey: "test-model-serving",
+									workloadv1alpha1.RoleLabelKey:             "role2",
+								},
+							},
+							MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
+							SubGroupSize:   ptr.To(int32(1)),
+							MinSubGroups:   ptr.To(int32(1)),
+							NetworkTopology: &schedulingv1beta1.NetworkTopologySpec{
+								Mode:               "soft",
+								HighestTierAllowed: ptr.To(2),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "No network topology",
+			modelServing: &workloadv1alpha1.ModelServing{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-model-serving",
+				},
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Template: workloadv1alpha1.ServingGroup{
+						Roles: []workloadv1alpha1.Role{
+							{
+								Name:     "role1",
+								Replicas: ptr.To(int32(3)),
+							},
+						},
+						GangPolicy: &workloadv1alpha1.GangPolicy{
+							MinRoleReplicas: map[string]int32{
+								"role1": 2,
+							},
+						},
+					},
+				},
+			},
+			podGroup: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{},
+			},
+			minRoleMember: map[string]int32{
+				"role1": 2,
+			},
+			expectedResult: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{
+					SubGroupPolicy: []schedulingv1beta1.SubGroupPolicySpec{
+						{
+							Name: "role1",
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									workloadv1alpha1.ModelServingNameLabelKey: "test-model-serving",
+									workloadv1alpha1.RoleLabelKey:             "role1",
+								},
+							},
+							MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
+							SubGroupSize:   ptr.To(int32(2)),
+							MinSubGroups:   ptr.To(int32(2)),
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "No GangPolicy MinRoleReplicas",
+			modelServing: &workloadv1alpha1.ModelServing{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-model-serving",
+				},
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Template: workloadv1alpha1.ServingGroup{
+						Roles: []workloadv1alpha1.Role{
+							{
+								Name:     "role1",
+								Replicas: ptr.To(int32(3)),
+							},
+						},
+						GangPolicy: &workloadv1alpha1.GangPolicy{
+							MinRoleReplicas: map[string]int32{},
+						},
+					},
+				},
+			},
+			podGroup: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{},
+			},
+			minRoleMember: map[string]int32{
+				"role1": 2,
+			},
+			expectedResult: &schedulingv1beta1.PodGroup{
+				Spec: schedulingv1beta1.PodGroupSpec{
+					SubGroupPolicy: []schedulingv1beta1.SubGroupPolicySpec{
+						{
+							Name: "role1",
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									workloadv1alpha1.ModelServingNameLabelKey: "test-model-serving",
+									workloadv1alpha1.RoleLabelKey:             "role1",
+								},
+							},
+							MatchLabelKeys: []string{workloadv1alpha1.RoleIDKey},
+							SubGroupSize:   ptr.To(int32(2)),
+							MinSubGroups:   ptr.To(int32(3)),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendSubGroupPolicy(tt.modelServing, tt.podGroup, tt.minRoleMember)
+
+			// Compare the result with expected result
+			assert.Equal(t, len(tt.expectedResult.Spec.SubGroupPolicy), len(result.Spec.SubGroupPolicy))
+
+			for i, expectedSubGroup := range tt.expectedResult.Spec.SubGroupPolicy {
+				actualSubGroup := result.Spec.SubGroupPolicy[i]
+
+				assert.Equal(t, expectedSubGroup.Name, actualSubGroup.Name)
+				assert.Equal(t, expectedSubGroup.LabelSelector, actualSubGroup.LabelSelector)
+				assert.Equal(t, expectedSubGroup.MatchLabelKeys, actualSubGroup.MatchLabelKeys)
+				assert.Equal(t, expectedSubGroup.SubGroupSize, actualSubGroup.SubGroupSize)
+				assert.Equal(t, expectedSubGroup.MinSubGroups, actualSubGroup.MinSubGroups)
+				assert.Equal(t, expectedSubGroup.NetworkTopology, actualSubGroup.NetworkTopology)
+			}
+		})
+	}
+}
