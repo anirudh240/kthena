@@ -499,10 +499,21 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		}
 	})
 
-	// Standard test message
+	// Wait for ModelRoute to be ready by making a test request with retry
+	t.Log("Waiting for ModelRoute to be ready...")
 	standardMessage := []utils.ChatMessage{
 		utils.NewChatMessage("user", "hello world"),
 	}
+	require.Eventually(t, func() bool {
+		resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
+		resp.Body.Close()
+		return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusTooManyRequests
+	}, 2*time.Minute, 2*time.Second, "ModelRoute should become ready and accept requests")
+	t.Log("ModelRoute is ready")
+
+	// Wait for rate limit window to reset after readiness check (the check may have consumed tokens)
+	t.Log("Waiting for rate limit window to reset after readiness check...")
+	time.Sleep((rateLimitWindowSeconds * time.Second) + windowResetBuffer)
 
 	// Test 1: Verify input token rate limit enforcement (30 tokens/minute)
 	t.Run("VerifyInputTokenRateLimitEnforcement", func(t *testing.T) {
@@ -511,8 +522,11 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		// Calculate expected successful requests
 		expectedSuccessfulRequests := inputTokenLimit / tokensPerRequest
 
+		// Wait a bit to ensure rate limit state is fresh for this subtest
+		time.Sleep(2 * time.Second)
+
 		for i := 0; i < expectedSuccessfulRequests; i++ {
-			resp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 			responseBody, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 
@@ -523,7 +537,7 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		}
 
 		// Next request should be rate limited (would need 11 more tokens, but quota exhausted)
-		rateLimitedResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		rateLimitedResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		defer rateLimitedResp.Body.Close()
 
 		assert.Equal(t, http.StatusTooManyRequests, rateLimitedResp.StatusCode,
@@ -549,13 +563,13 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		// Exhaust quota again to ensure rate limit is active
 		expectedSuccessfulRequests := inputTokenLimit / tokensPerRequest
 		for i := 0; i < expectedSuccessfulRequests; i++ {
-			resp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 			resp.Body.Close()
 			assert.Equal(t, http.StatusOK, resp.StatusCode, "Request %d should succeed", i+1)
 		}
 
 		// Verify rate limit is active
-		rateLimitedResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		rateLimitedResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		rateLimitedResp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, rateLimitedResp.StatusCode,
 			"Rate limit should be active after exhausting quota")
@@ -564,7 +578,7 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		t.Logf("Waiting %v (within rate limit window)...", halfWindowDuration)
 		time.Sleep(halfWindowDuration)
 
-		midWindowResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		midWindowResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		midWindowResp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, midWindowResp.StatusCode,
 			"Rate limit should persist within the time window")
@@ -575,7 +589,7 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 			remainingWindowDuration, halfWindowDuration+remainingWindowDuration)
 		time.Sleep(remainingWindowDuration)
 
-		postWindowResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		postWindowResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		postWindowResp.Body.Close()
 		assert.Equal(t, http.StatusOK, postWindowResp.StatusCode,
 			"Request should succeed after rate limit window expires")
@@ -595,14 +609,14 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		// Consume the quota again
 		expectedSuccessfulRequests := inputTokenLimit / tokensPerRequest
 		for i := 0; i < expectedSuccessfulRequests; i++ {
-			resp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 			resp.Body.Close()
 			assert.Equal(t, http.StatusOK, resp.StatusCode,
 				"Request %d should succeed", i+1)
 		}
 
 		// Confirm rate limiting is active
-		preResetResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		preResetResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		preResetResp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, preResetResp.StatusCode,
 			"Rate limit should be active before window reset")
@@ -614,14 +628,14 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 
 		// Verify quota is restored after reset (should allow 2 requests again)
 		for i := 0; i < expectedSuccessfulRequests; i++ {
-			resp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 			resp.Body.Close()
 			assert.Equal(t, http.StatusOK, resp.StatusCode,
 				"Request %d should succeed after reset", i+1)
 		}
 
 		// Verify rate limiting kicks in again after consuming quota
-		postResetRateLimitedResp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, standardMessage)
+		postResetRateLimitedResp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 		postResetRateLimitedResp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, postResetRateLimitedResp.StatusCode,
 			"Rate limit should be active again after consuming quota")
@@ -647,7 +661,7 @@ func TestModelRouteWithRateLimit(t *testing.T) {
 		var totalResponseSize int
 
 		for attempt := 0; attempt < 10; attempt++ {
-			resp := utils.SendChatRequest(t, modelRoute.Spec.ModelName, longerPrompt)
+			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, longerPrompt)
 			responseBody, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 
