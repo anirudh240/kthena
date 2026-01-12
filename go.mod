@@ -37,6 +37,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.22.4
 	sigs.k8s.io/gateway-api v1.4.0
 	sigs.k8s.io/gateway-api-inference-extension v1.2.0
+	sigs.k8s.io/lws v0.7.0
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0
 	sigs.k8s.io/yaml v1.6.0
 	volcano.sh/apis v0.0.0-20251222111824-40fed4793a6f
