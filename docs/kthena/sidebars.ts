@@ -63,6 +63,13 @@ const sidebars: SidebarsConfig = {
             'user-guide/gateway-inference-extension-support',
           ],
         },
+        {
+          type: 'category',
+          label: 'Observability',
+          items: [
+            'user-guide/router-observability',
+          ],
+        },
         'user-guide/runtime',
         'user-guide/binpack-scale-down',
         {
