@@ -1485,6 +1485,9 @@ func (c *ModelServingController) manageHeadlessService(ctx context.Context, ms *
 	}
 
 	for _, sg := range servingGroups {
+		if sg.Status == datastore.ServingGroupDeleting {
+			continue
+		}
 		for _, role := range ms.Spec.Template.Roles {
 			roleList, err := c.store.GetRoleList(utils.GetNamespaceName(ms), sg.Name, role.Name)
 			if err != nil {
