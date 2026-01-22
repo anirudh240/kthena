@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -46,6 +47,10 @@ type ModelServingSpec struct {
 	// +kubebuilder:default=volcano
 	SchedulerName string `json:"schedulerName"`
 
+	// Plugins defines optional plugin chain to customize serving pods.
+	// +optional
+	Plugins []PluginSpec `json:"plugins,omitempty"`
+
 	// Template defines the template for ServingGroup
 	Template ServingGroup `json:"template"`
 
@@ -61,6 +66,53 @@ type ModelServingSpec struct {
 }
 
 type RecoveryPolicy string
+
+// PluginType represents the implementation category of a plugin.
+type PluginType string
+
+const (
+	PluginTypeBuiltIn PluginType = "BuiltIn"
+)
+
+// PluginTarget specifies which pod kinds a plugin applies to.
+// If empty, it defaults to All.
+type PluginTarget string
+
+const (
+	PluginTargetAll    PluginTarget = "All"
+	PluginTargetEntry  PluginTarget = "Entry"
+	PluginTargetWorker PluginTarget = "Worker"
+)
+
+// PluginScope restricts where a plugin is applied.
+// Roles is a whitelist; empty means all roles.
+// Target limits to entry/worker/all pods; empty means all pods.
+type PluginScope struct {
+	// Roles limits the plugin to the specified role names.
+	// +optional
+	Roles []string `json:"roles,omitempty"`
+	// Target limits the plugin to specific pod target (Entry/Worker/All).
+	// kubebuilder:default=All
+	// kubebuilder:validation:Enum={All,Entry,Worker}
+	Target PluginTarget `json:"target,omitempty"`
+}
+
+// PluginSpec declares a plugin instance attached to a ModelServing.
+type PluginSpec struct {
+	// Name uniquely identifies the plugin instance within the ModelServing.
+	Name string `json:"name"`
+	// Type indicates plugin category. For now, only BuiltIn is supported.
+	// +kubebuilder:default=BuiltIn
+	// +kubebuilder:validation:Enum={BuiltIn}
+	Type PluginType `json:"type"`
+	// Config is an opaque JSON blob interpreted by the plugin implementation.
+	// +optional
+	Config *apiextensionsv1.JSON `json:"config,omitempty"`
+	// Scope optionally narrows where this plugin runs.
+	// By default, it runs on all pods.
+	// +optional
+	Scope *PluginScope `json:"scope,omitempty"`
+}
 
 const (
 	// ServingGroupRecreate will recreate all the pods in the ServingGroup if
@@ -104,21 +156,12 @@ type RollingUpdateConfiguration struct {
 	// The maximum number of replicas that can be unavailable during the update.
 	// Value can be an absolute number (ex: 5) or a percentage of total replicas at the start of update (ex: 10%).
 	// Absolute number is calculated from percentage by rounding down.
-	// This can not be 0 if MaxSurge is 0.
+	// This can not be 0.
 	// By default, a fixed value of 1 is used.
 	// +kubebuilder:validation:XIntOrString
 	// +kubebuilder:default=1
-	MaxUnavailable intstr.IntOrString `json:"maxUnavailable,omitempty"`
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 
-	// The maximum number of replicas that can be scheduled above the original number of
-	// replicas.
-	// Value can be an absolute number (ex: 5) or a percentage of total replicas at
-	// the start of the update (ex: 10%).
-	// Absolute number is calculated from percentage by rounding up.
-	// By default, a value of 0 is used.
-	// +kubebuilder:validation:XIntOrString
-	// +kubebuilder:default=0
-	MaxSurge intstr.IntOrString `json:"maxSurge,omitempty"`
 	// Partition indicates the ordinal at which the ModelServing should be partitioned
 	// for updates. During a rolling update, all ServingGroups from ordinal Replicas-1 to
 	// Partition are updated. All ServingGroups from ordinal Partition-1 to 0 remain untouched.
@@ -165,6 +208,16 @@ type ModelServingStatus struct {
 
 	// AvailableReplicas track the number of ServingGroup that are in ready state (updated or not).
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
+
+	// CurrentRevision, if not empty, indicates the ControllerRevision version used to generate
+	// ServingGroups in the sequence [0,currentReplicas).
+	// +optional
+	CurrentRevision string `json:"currentRevision,omitempty"`
+
+	// UpdateRevision, if not empty, indicates the ControllerRevision version used to generate
+	// ServingGroups in the sequence [replicas-updatedReplicas,replicas).
+	// +optional
+	UpdateRevision string `json:"updateRevision,omitempty"`
 
 	// Conditions track the condition of the ModelServing.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

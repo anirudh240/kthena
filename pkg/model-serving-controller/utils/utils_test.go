@@ -21,13 +21,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 
 	workloadv1alpha1 "github.com/volcano-sh/kthena/pkg/apis/workload/v1alpha1"
 )
 
 func TestSetCondition(t *testing.T) {
 	t.Run("All groups ready", func(t *testing.T) {
-		mi := &workloadv1alpha1.ModelServing{
+		ms := &workloadv1alpha1.ModelServing{
 			Spec: workloadv1alpha1.ModelServingSpec{},
 			Status: workloadv1alpha1.ModelServingStatus{
 				Conditions: []metav1.Condition{},
@@ -38,17 +40,17 @@ func TestSetCondition(t *testing.T) {
 		updatedGroups := []int{2, 3}
 		currentGroups := []int{0, 1}
 
-		shouldUpdate := SetCondition(mi, progressingGroups, updatedGroups, currentGroups)
+		shouldUpdate := SetCondition(ms, progressingGroups, updatedGroups, currentGroups)
 		assert.True(t, shouldUpdate)
-		assert.Len(t, mi.Status.Conditions, 1)
-		cond := mi.Status.Conditions[0]
+		assert.Len(t, ms.Status.Conditions, 1)
+		cond := ms.Status.Conditions[0]
 		assert.Equal(t, string(workloadv1alpha1.ModelServingAvailable), cond.Type)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Equal(t, "AllGroupsReady", cond.Reason)
 	})
 
 	t.Run("set updating in progress", func(t *testing.T) {
-		mi := &workloadv1alpha1.ModelServing{
+		ms := &workloadv1alpha1.ModelServing{
 			Spec: workloadv1alpha1.ModelServingSpec{},
 			Status: workloadv1alpha1.ModelServingStatus{
 				Conditions: []metav1.Condition{},
@@ -59,10 +61,10 @@ func TestSetCondition(t *testing.T) {
 		updatedGroups := []int{2, 3}
 		currentGroups := []int{0, 1}
 
-		shouldUpdate := SetCondition(mi, progressingGroups, updatedGroups, currentGroups)
+		shouldUpdate := SetCondition(ms, progressingGroups, updatedGroups, currentGroups)
 		assert.True(t, shouldUpdate)
-		assert.Len(t, mi.Status.Conditions, 1)
-		cond := mi.Status.Conditions[0]
+		assert.Len(t, ms.Status.Conditions, 1)
+		cond := ms.Status.Conditions[0]
 		assert.Equal(t, string(workloadv1alpha1.ModelServingUpdateInProgress), cond.Type)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Contains(t, cond.Message, SomeGroupsAreProgressing)
@@ -71,7 +73,7 @@ func TestSetCondition(t *testing.T) {
 
 	t.Run("set partition, is updating", func(t *testing.T) {
 		partition := int32(2)
-		mi := &workloadv1alpha1.ModelServing{
+		ms := &workloadv1alpha1.ModelServing{
 			Spec: workloadv1alpha1.ModelServingSpec{
 				RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 					RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
@@ -88,12 +90,154 @@ func TestSetCondition(t *testing.T) {
 		updatedGroups := []int{2}
 		currentGroups := []int{0, 1}
 
-		shouldUpdate := SetCondition(mi, progressingGroups, updatedGroups, currentGroups)
+		shouldUpdate := SetCondition(ms, progressingGroups, updatedGroups, currentGroups)
 		assert.True(t, shouldUpdate)
-		assert.Len(t, mi.Status.Conditions, 1)
-		cond := mi.Status.Conditions[0]
+		assert.Len(t, ms.Status.Conditions, 1)
+		cond := ms.Status.Conditions[0]
 		assert.Equal(t, string(workloadv1alpha1.ModelServingProgressing), cond.Type)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Contains(t, cond.Message, SomeGroupsAreProgressing)
 	})
+}
+
+func TestGetMaxUnavailable(t *testing.T) {
+	tests := []struct {
+		name           string
+		modelServing   *workloadv1alpha1.ModelServing
+		expectedResult int
+		expectError    bool
+	}{
+		{
+			name: "Default case - no rollout strategy",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](5),
+				},
+			},
+			expectedResult: 1, // Default value
+			expectError:    false,
+		},
+		{
+			name: "Default case - rollout strategy but no rolling update config",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](10),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+					},
+				},
+			},
+			expectedResult: 1, // Default value
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as integer - value 2",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](10),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromInt(2)),
+						},
+					},
+				},
+			},
+			expectedResult: 2,
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as integer - value 0",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](5),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromInt(0)),
+						},
+					},
+				},
+			},
+			expectedResult: 0,
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as percentage - 20%",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](10),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromString("20%")),
+						},
+					},
+				},
+			},
+			expectedResult: 2, // 20% of 10 is 2
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as percentage - 50%",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](9),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromString("50%")),
+						},
+					},
+				},
+			},
+			expectedResult: 4, // 50% of 9 is 4.5, rounded down to 4
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as percentage - 100%",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](3),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromString("100%")),
+						},
+					},
+				},
+			},
+			expectedResult: 3, // 100% of 3 is 3
+			expectError:    false,
+		},
+		{
+			name: "MaxUnavailable as percentage - 0%",
+			modelServing: &workloadv1alpha1.ModelServing{
+				Spec: workloadv1alpha1.ModelServingSpec{
+					Replicas: ptr.To[int32](10),
+					RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
+						Type: "ServingGroupRollingUpdate",
+						RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
+							MaxUnavailable: ptr.To(intstr.FromString("0%")),
+						},
+					},
+				},
+			},
+			expectedResult: 0, // 0% of 10 is 0
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := GetMaxUnavailable(tt.modelServing)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedResult, result)
+			}
+		})
+	}
 }

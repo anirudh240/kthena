@@ -258,7 +258,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `minRoleReplicas` _object (keys:string, values:integer)_ | MinRoleReplicas defines the minimum number of replicas required for each role<br />in gang scheduling. This map allows users to specify different<br />minimum replica requirements for different roles.<br />Notice: In practice, when determining the minTaskMember for a podGroup, it takes the minimum value between `MinRoleReplicas[role.Name]` and role.Replicas.<br />If you set:<br />gangPolicy:<br />  minRoleReplicas:<br />    Prefill: 2<br />    Decode: 2<br />And set the roles as:<br />roles:<br />  - name: P<br />    replicas: 1<br />    workerReplicas: 2<br />  - name: D<br />    replicas: 3<br />    workerReplicas: 1<br />The resulting podGroup will have minTaskMember:<br />minTaskMember:<br />  P-0: 3 (1 entry pod + 2 worker pods)<br />  D-0: 4 (1 entry pod + 3 worker pods)<br />  D-1: 4 (1 entry pod + 3 worker pods)<br />The replicase of P is min(minRoleReplicas['P'], role.Replicas) = min(2, 1) = 1<br />The replicase of D is min(minRoleReplicas['D'], role.Replicas) = min(2, 3) = 2<br />Key: role name<br />Value: minimum number of replicas required for that role |  |  |
+| `minRoleReplicas` _object (keys:string, values:integer)_ | MinRoleReplicas defines the minimum number of replicas required for each role<br />in gang scheduling, pods in each role are strictly gang required.<br />This map allows users to specify different minimum replica requirements for different roles.<br />If this field is not set, all roles in the ServingGroup are considered gang required by default.<br />For example if you specify a 2P(prefill) 4D(decode) serving group and set the below gangPolicy:<br />```yaml<br />gangPolicy:<br />  minRoleReplicas:<br />    prefill: 1<br />    decode: 1<br />```<br />It will result in the following behavior:<br />At least one prefill and one decode must be scheduled before any of the pods in the serving group can run.<br />And pods within a role must be scheduled together. |  |  |
 
 
 #### HeterogeneousTarget
@@ -504,6 +504,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `replicas` _integer_ | Number of ServingGroups. That is the number of instances that run serving tasks<br />Default to 1. | 1 |  |
 | `schedulerName` _string_ | SchedulerName defines the name of the scheduler used by ModelServing | volcano |  |
+| `plugins` _[PluginSpec](#pluginspec) array_ | Plugins defines optional plugin chain to customize serving pods. |  |  |
 | `template` _[ServingGroup](#servinggroup)_ | Template defines the template for ServingGroup |  |  |
 | `rolloutStrategy` _[RolloutStrategy](#rolloutstrategy)_ | RolloutStrategy defines the strategy that will be applied to update replicas |  |  |
 | `recoveryPolicy` _[RecoveryPolicy](#recoverypolicy)_ | RecoveryPolicy defines the recovery policy for the failed Pod to be rebuilt | RoleRecreate | Enum: [ServingGroupRecreate RoleRecreate None] <br /> |
@@ -527,6 +528,8 @@ _Appears in:_
 | `currentReplicas` _integer_ | CurrentReplicas is the number of ServingGroup created by the ModelServing controller from the ModelServing version |  |  |
 | `updatedReplicas` _integer_ | UpdatedReplicas track the number of ServingGroup that have been updated (ready or not). |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas track the number of ServingGroup that are in ready state (updated or not). |  |  |
+| `currentRevision` _string_ | CurrentRevision, if not empty, indicates the ControllerRevision version used to generate<br />ServingGroups in the sequence [0,currentReplicas). |  |  |
+| `updateRevision` _string_ | UpdateRevision, if not empty, indicates the ControllerRevision version used to generate<br />ServingGroups in the sequence [replicas-updatedReplicas,replicas). |  |  |
 | `labelSelector` _string_ | LabelSelector is a label query over pods that should match the replica count. |  |  |
 
 
@@ -608,6 +611,79 @@ _Appears in:_
 | `rolePolicy` _[NetworkTopologySpec](#networktopologyspec)_ | RolePolicy defines the fine-grained network topology scheduling requirement for instances of a `role`. |  |  |
 
 
+#### PluginScope
+
+
+
+PluginScope restricts where a plugin is applied.
+Roles is a whitelist; empty means all roles.
+Target limits to entry/worker/all pods; empty means all pods.
+
+
+
+_Appears in:_
+- [PluginSpec](#pluginspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `roles` _string array_ | Roles limits the plugin to the specified role names. |  |  |
+| `target` _[PluginTarget](#plugintarget)_ | Target limits the plugin to specific pod target (Entry/Worker/All).<br />kubebuilder:default=All<br />kubebuilder:validation:Enum=\{All,Entry,Worker\} |  |  |
+
+
+#### PluginSpec
+
+
+
+PluginSpec declares a plugin instance attached to a ModelServing.
+
+
+
+_Appears in:_
+- [ModelServingSpec](#modelservingspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name uniquely identifies the plugin instance within the ModelServing. |  |  |
+| `type` _[PluginType](#plugintype)_ | Type indicates plugin category. For now, only BuiltIn is supported. | BuiltIn | Enum: [BuiltIn] <br /> |
+| `config` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#json-v1-apiextensions-k8s-io)_ | Config is an opaque JSON blob interpreted by the plugin implementation. |  |  |
+| `scope` _[PluginScope](#pluginscope)_ | Scope optionally narrows where this plugin runs.<br />By default, it runs on all pods. |  |  |
+
+
+#### PluginTarget
+
+_Underlying type:_ _string_
+
+PluginTarget specifies which pod kinds a plugin applies to.
+If empty, it defaults to All.
+
+
+
+_Appears in:_
+- [PluginScope](#pluginscope)
+
+| Field | Description |
+| --- | --- |
+| `All` |  |
+| `Entry` |  |
+| `Worker` |  |
+
+
+#### PluginType
+
+_Underlying type:_ _string_
+
+PluginType represents the implementation category of a plugin.
+
+
+
+_Appears in:_
+- [PluginSpec](#pluginspec)
+
+| Field | Description |
+| --- | --- |
+| `BuiltIn` |  |
+
+
 #### PodTemplateSpec
 
 
@@ -676,8 +752,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#intorstring-intstr-util)_ | The maximum number of replicas that can be unavailable during the update.<br />Value can be an absolute number (ex: 5) or a percentage of total replicas at the start of update (ex: 10%).<br />Absolute number is calculated from percentage by rounding down.<br />This can not be 0 if MaxSurge is 0.<br />By default, a fixed value of 1 is used. | 1 | XIntOrString: \{\} <br /> |
-| `maxSurge` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#intorstring-intstr-util)_ | The maximum number of replicas that can be scheduled above the original number of<br />replicas.<br />Value can be an absolute number (ex: 5) or a percentage of total replicas at<br />the start of the update (ex: 10%).<br />Absolute number is calculated from percentage by rounding up.<br />By default, a value of 0 is used. | 0 | XIntOrString: \{\} <br /> |
+| `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#intorstring-intstr-util)_ | The maximum number of replicas that can be unavailable during the update.<br />Value can be an absolute number (ex: 5) or a percentage of total replicas at the start of update (ex: 10%).<br />Absolute number is calculated from percentage by rounding down.<br />This can not be 0.<br />By default, a fixed value of 1 is used. | 1 | XIntOrString: \{\} <br /> |
 | `partition` _integer_ | Partition indicates the ordinal at which the ModelServing should be partitioned<br />for updates. During a rolling update, all ServingGroups from ordinal Replicas-1 to<br />Partition are updated. All ServingGroups from ordinal Partition-1 to 0 remain untouched.<br />The default value is 0. |  |  |
 
 

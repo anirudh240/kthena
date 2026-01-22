@@ -123,6 +123,18 @@ func TestModelRouteSubset(t *testing.T) {
 	router.TestModelRouteSubsetShared(t, testCtx, testNamespace, true, kthenaNamespace)
 }
 
+// TestModelRouteWithRateLimit tests local rate limiting enforced by the Kthena Router.
+// This test runs the shared test function with Gateway API enabled (with ParentRefs).
+func TestModelRouteWithRateLimit(t *testing.T) {
+	router.TestModelRouteWithRateLimitShared(t, testCtx, testNamespace, true, kthenaNamespace)
+}
+
+// TestModelRouteLora tests ModelRoute with LoRA adapter routing.
+// This test runs the shared test function with Gateway API enabled (with ParentRefs).
+func TestModelRouteLora(t *testing.T) {
+	router.TestModelRouteLoraShared(t, testCtx, testNamespace, true, kthenaNamespace)
+}
+
 // TestDuplicateModelName tests that the same modelName can route to different backend models
 // when accessed through different Gateways (ports). This demonstrates how Gateway API resolves
 // the global modelName conflict problem by allowing modelName isolation per Gateway.

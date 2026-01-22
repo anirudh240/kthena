@@ -29,7 +29,7 @@ import (
 func TestValidPodNameLength(t *testing.T) {
 	replicas := int32(3)
 	type args struct {
-		mi *workloadv1alpha1.ModelServing
+		ms *workloadv1alpha1.ModelServing
 	}
 	tests := []struct {
 		name string
@@ -39,7 +39,7 @@ func TestValidPodNameLength(t *testing.T) {
 		{
 			name: "normal name length",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					ObjectMeta: v1.ObjectMeta{
 						Name: "valid-name",
 					},
@@ -58,7 +58,7 @@ func TestValidPodNameLength(t *testing.T) {
 		{
 			name: "name length exceeds limit",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					ObjectMeta: v1.ObjectMeta{
 						Name: "this-is-a-very-long-name-that-exceeds-the-allowed-length-for-generated-name",
 					},
@@ -82,7 +82,7 @@ func TestValidPodNameLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validGeneratedNameLength(tt.args.mi)
+			got := validGeneratedNameLength(tt.args.ms)
 			if got != nil {
 				assert.EqualValues(t, tt.want[0], got[0])
 			} else {
@@ -95,7 +95,7 @@ func TestValidPodNameLength(t *testing.T) {
 func TestValidateRollingUpdateConfiguration(t *testing.T) {
 	replicas := int32(3)
 	type args struct {
-		mi *workloadv1alpha1.ModelServing
+		ms *workloadv1alpha1.ModelServing
 	}
 	tests := []struct {
 		name string
@@ -105,16 +105,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "normal rolling update configuration",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -128,56 +124,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "invalid maxUnavailable format",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.String,
-									StrVal: "invalid",
-								},
-								MaxSurge: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			want: field.ErrorList{
-				field.Invalid(
-					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxUnavailable"),
-					intstr.IntOrString{
-						Type:   intstr.String,
-						StrVal: "invalid",
-					},
-					"a valid percent string must be a numeric string followed by an ending '%' (e.g. '1%',  or '93%', regex used for validation is '[0-9]+%')",
-				),
-				field.Invalid(
-					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxUnavailable"),
-					intstr.IntOrString{
-						Type:   intstr.String,
-						StrVal: "invalid",
-					},
-					"validate maxUnavailable",
-				),
-			},
-		},
-		{
-			name: "invalid maxSurge format",
-			args: args{
-				mi: &workloadv1alpha1.ModelServing{
-					Spec: workloadv1alpha1.ModelServingSpec{
-						Replicas: &replicas,
-						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
-							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.String,
 									StrVal: "invalid",
 								},
@@ -188,36 +140,32 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 			},
 			want: field.ErrorList{
 				field.Invalid(
-					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxSurge"),
-					intstr.IntOrString{
+					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxUnavailable"),
+					&intstr.IntOrString{
 						Type:   intstr.String,
 						StrVal: "invalid",
 					},
 					"a valid percent string must be a numeric string followed by an ending '%' (e.g. '1%',  or '93%', regex used for validation is '[0-9]+%')",
 				),
 				field.Invalid(
-					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxSurge"),
-					intstr.IntOrString{
+					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration").Child("maxUnavailable"),
+					&intstr.IntOrString{
 						Type:   intstr.String,
 						StrVal: "invalid",
 					},
-					"validate maxSurge",
+					"invalidate maxUnavailable",
 				),
 			},
 		},
 		{
 			name: "both maxUnavailable and maxSurge are zero",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 0,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 0,
 								},
@@ -230,23 +178,19 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 				field.Invalid(
 					field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration"),
 					"",
-					"maxUnavailable and maxSurge cannot both be 0",
+					"maxUnavailable cannot be 0",
 				),
 			},
 		},
 		{
 			name: "valid partition - within range",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -261,16 +205,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "invalid partition - negative value",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -291,16 +231,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "invalid partition - equal to replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -321,16 +257,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "invalid partition - greater than replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -351,16 +283,12 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 		{
 			name: "valid partition - zero value",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						RolloutStrategy: &workloadv1alpha1.RolloutStrategy{
 							RollingUpdateConfiguration: &workloadv1alpha1.RollingUpdateConfiguration{
-								MaxUnavailable: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 1,
-								},
-								MaxSurge: intstr.IntOrString{
+								MaxUnavailable: &intstr.IntOrString{
 									Type:   intstr.Int,
 									IntVal: 1,
 								},
@@ -375,7 +303,7 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validateRollingUpdateConfiguration(tt.args.mi)
+			got := validateRollingUpdateConfiguration(tt.args.ms)
 			if got != nil {
 				assert.EqualValues(t, tt.want, got)
 			} else {
@@ -387,7 +315,7 @@ func TestValidateRollingUpdateConfiguration(t *testing.T) {
 
 func TestValidatorReplicas(t *testing.T) {
 	type args struct {
-		mi *workloadv1alpha1.ModelServing
+		ms *workloadv1alpha1.ModelServing
 	}
 	tests := []struct {
 		name string
@@ -397,7 +325,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "normal replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32Ptr(3),
 						Template: workloadv1alpha1.ServingGroup{
@@ -414,7 +342,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "replicas is nil",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32PtrNil(),
 						Template: workloadv1alpha1.ServingGroup{
@@ -437,7 +365,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "replicas is less than 0",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32Ptr(-1),
 						Template: workloadv1alpha1.ServingGroup{
@@ -460,7 +388,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "role replicas is less than 0",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32Ptr(3),
 						Template: workloadv1alpha1.ServingGroup{
@@ -483,7 +411,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "role replicas is nil",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32Ptr(3),
 						Template: workloadv1alpha1.ServingGroup{
@@ -506,7 +434,7 @@ func TestValidatorReplicas(t *testing.T) {
 		{
 			name: "no role",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: int32Ptr(3),
 						Template: workloadv1alpha1.ServingGroup{
@@ -526,7 +454,7 @@ func TestValidatorReplicas(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validatorReplicas(tt.args.mi)
+			got := validatorReplicas(tt.args.ms)
 			if got != nil {
 				assert.EqualValues(t, tt.want, got)
 			} else {
@@ -540,7 +468,7 @@ func TestValidateGangPolicy(t *testing.T) {
 	replicas := int32(3)
 	roleReplicas := int32(2)
 	type args struct {
-		mi *workloadv1alpha1.ModelServing
+		ms *workloadv1alpha1.ModelServing
 	}
 	tests := []struct {
 		name string
@@ -550,7 +478,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "valid minRoleReplicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -575,7 +503,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "invalid minRoleReplicas - role not exist",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -606,7 +534,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "invalid minRoleReplicas - exceeds total replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -637,7 +565,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "invalid minRoleReplicas - negative value",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -668,7 +596,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "nil gang Policy",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -689,7 +617,7 @@ func TestValidateGangPolicy(t *testing.T) {
 		{
 			name: "nil minRoleReplicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -712,7 +640,7 @@ func TestValidateGangPolicy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validateGangPolicy(tt.args.mi)
+			got := validateGangPolicy(tt.args.ms)
 			if got != nil {
 				assert.EqualValues(t, tt.want, got)
 			} else {
@@ -726,7 +654,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 	replicas := int32(3)
 	roleReplicas := int32(2)
 	type args struct {
-		mi *workloadv1alpha1.ModelServing
+		ms *workloadv1alpha1.ModelServing
 	}
 	tests := []struct {
 		name string
@@ -736,7 +664,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 		{
 			name: "valid worker replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -756,7 +684,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 		{
 			name: "valid zero worker replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -776,7 +704,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 		{
 			name: "invalid negative worker replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -802,7 +730,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 		{
 			name: "multiple roles with one invalid worker replicas",
 			args: args{
-				mi: &workloadv1alpha1.ModelServing{
+				ms: &workloadv1alpha1.ModelServing{
 					Spec: workloadv1alpha1.ModelServingSpec{
 						Replicas: &replicas,
 						Template: workloadv1alpha1.ServingGroup{
@@ -833,7 +761,7 @@ func TestValidateWorkerReplicas(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validateWorkerReplicas(tt.args.mi)
+			got := validateWorkerReplicas(tt.args.ms)
 			if got != nil {
 				assert.EqualValues(t, tt.want, got)
 			} else {

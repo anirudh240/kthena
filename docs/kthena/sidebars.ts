@@ -63,6 +63,13 @@ const sidebars: SidebarsConfig = {
             'user-guide/gateway-inference-extension-support',
           ],
         },
+        {
+          type: 'category',
+          label: 'Observability',
+          items: [
+            'user-guide/router-observability',
+          ],
+        },
         'user-guide/runtime',
         'user-guide/binpack-scale-down',
         {
@@ -81,7 +88,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'General',
-      items: ['general/cert-manager', 'general/faq'],
+      items: ['general/cert-manager', 'general/faq', 'general/prometheus', 'general/data-parallel-deployment'],
     },
     {
       type: 'category',

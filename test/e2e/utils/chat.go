@@ -71,7 +71,9 @@ func CheckChatCompletionsWithHeaders(t *testing.T, modelName string, messages []
 	return CheckChatCompletionsWithURLAndHeaders(t, DefaultRouterURL, modelName, messages, headers)
 }
 
-func CheckChatCompletionsWithURLAndHeaders(t *testing.T, url string, modelName string, messages []ChatMessage, headers map[string]string) *ChatCompletionsResponse {
+// SendChatRequestWithRetry sends a chat completions request with retry logic but without assertions.
+// It returns the final response regardless of status code.
+func SendChatRequestWithRetry(t *testing.T, url string, modelName string, messages []ChatMessage, headers map[string]string) *ChatCompletionsResponse {
 	requestBody := ChatCompletionsRequest{
 		Model:    modelName,
 		Messages: messages,
@@ -145,12 +147,9 @@ func CheckChatCompletionsWithURLAndHeaders(t *testing.T, url string, modelName s
 			continue
 		}
 
-		// Last attempt, verify response
+		// Last attempt - log the response but don't assert success
 		t.Logf("Chat response status: %d", resp.StatusCode)
 		t.Logf("Chat response: %s", responseStr)
-		assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected HTTP 200 status code")
-		assert.NotEmpty(t, responseStr, "Chat response is empty")
-		assert.NotContains(t, responseStr, "error", "Chat response contains error")
 		break
 	}
 
@@ -158,6 +157,17 @@ func CheckChatCompletionsWithURLAndHeaders(t *testing.T, url string, modelName s
 		StatusCode: resp.StatusCode,
 		Body:       responseStr,
 	}
+}
+
+func CheckChatCompletionsWithURLAndHeaders(t *testing.T, url string, modelName string, messages []ChatMessage, headers map[string]string) *ChatCompletionsResponse {
+	resp := SendChatRequestWithRetry(t, url, modelName, messages, headers)
+
+	// Assert successful response
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected HTTP 200 status code")
+	assert.NotEmpty(t, resp.Body, "Chat response is empty")
+	assert.NotContains(t, resp.Body, "error", "Chat response contains error")
+
+	return resp
 }
 
 // containsError checks if the response string contains error indicators
@@ -180,4 +190,28 @@ func NewChatMessage(role, content string) ChatMessage {
 		Role:    role,
 		Content: content,
 	}
+}
+func SendChatRequest(t *testing.T, modelName string, messages []ChatMessage) *http.Response {
+	return SendChatRequestWithURL(t, DefaultRouterURL, modelName, messages)
+}
+
+func SendChatRequestWithURL(t *testing.T, url string, modelName string, messages []ChatMessage) *http.Response {
+	requestBody := ChatCompletionsRequest{
+		Model:    modelName,
+		Messages: messages,
+		Stream:   false,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	require.NoError(t, err, "Failed to marshal request body")
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	require.NoError(t, err, "Failed to create HTTP request")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err, "Failed to send HTTP request")
+
+	return resp
 }
