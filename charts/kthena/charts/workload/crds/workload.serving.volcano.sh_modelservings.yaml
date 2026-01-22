@@ -40,6 +40,51 @@ spec:
             description: ModelServingSpec defines the specification of the ModelServing
               resource.
             properties:
+              plugins:
+                description: Plugins defines optional plugin chain to customize serving
+                  pods.
+                items:
+                  description: PluginSpec declares a plugin instance attached to a
+                    ModelServing.
+                  properties:
+                    config:
+                      description: Config is an opaque JSON blob interpreted by the
+                        plugin implementation.
+                      x-kubernetes-preserve-unknown-fields: true
+                    name:
+                      description: Name uniquely identifies the plugin instance within
+                        the ModelServing.
+                      type: string
+                    scope:
+                      description: |-
+                        Scope optionally narrows where this plugin runs.
+                        By default, it runs on all pods.
+                      properties:
+                        roles:
+                          description: Roles limits the plugin to the specified role
+                            names.
+                          items:
+                            type: string
+                          type: array
+                        target:
+                          description: |-
+                            Target limits the plugin to specific pod target (Entry/Worker/All).
+                            kubebuilder:default=All
+                            kubebuilder:validation:Enum={All,Entry,Worker}
+                          type: string
+                      type: object
+                    type:
+                      default: BuiltIn
+                      description: Type indicates plugin category. For now, only BuiltIn
+                        is supported.
+                      enum:
+                      - BuiltIn
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
               recoveryPolicy:
                 default: RoleRecreate
                 description: RecoveryPolicy defines the recovery policy for the failed
