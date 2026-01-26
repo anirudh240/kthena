@@ -114,15 +114,6 @@ func TestModelServingPodRecovery(t *testing.T) {
 		}
 	})
 
-	// Ensure the created ModelServing is cleaned up after the test completes
-	t.Cleanup(func() {
-		err := kthenaClient.WorkloadV1alpha1().
-			ModelServings(testNamespace).
-			Delete(ctx, modelServing.Name, metav1.DeleteOptions{})
-		if err != nil {
-			t.Logf("Failed to delete ModelServing %q during cleanup: %v", modelServing.Name, err)
-		}
-	})
 	// Wait until ModelServing is ready
 	utils.WaitForModelServingReady(t, ctx, kthenaClient, testNamespace, modelServing.Name)
 
