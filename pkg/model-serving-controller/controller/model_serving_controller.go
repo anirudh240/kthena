@@ -275,7 +275,6 @@ func (c *ModelServingController) updatePod(_, newObj interface{}) {
 	}
 
 	if c.shouldSkipPodHandling(ms, servingGroupName, newPod) {
-		// Pod revision mssmatch ServingGroup, this can rarely happen
 		return
 	}
 
@@ -296,6 +295,13 @@ func (c *ModelServingController) updatePod(_, newObj interface{}) {
 		if err != nil {
 			klog.Errorf("handle error pod failed: %v", err)
 		}
+	default:
+		// Add the group and role to the global storage, otherwise after restart,
+		// it may create unexpected group and role because of missing group or role info.
+		c.store.AddServingGroupAndRole(types.NamespacedName{
+			Namespace: ms.Namespace,
+			Name:      ms.Name,
+		}, servingGroupName, utils.PodRevision(newPod), utils.GetRoleName(newPod), utils.GetRoleID(newPod))
 	}
 }
 
@@ -1147,8 +1153,15 @@ func (c *ModelServingController) getModelServingByChildResource(resource metav1.
 	return ms, servingGroupName, nil
 }
 
-// shouldSkipPodHandling checks if a pod should be skipped based on revision mismatch
+// shouldSkipPodHandling checks if a pod should be skipped based on owner mismatch or revision mismatch
 func (c *ModelServingController) shouldSkipPodHandling(ms *workloadv1alpha1.ModelServing, servingGroupName string, pod *corev1.Pod) bool {
+	for _, ownerRef := range pod.GetOwnerReferences() {
+		if ownerRef.APIVersion == workloadv1alpha1.SchemeGroupVersion.String() && ownerRef.Kind == "ModelServing" &&
+			ownerRef.UID != ms.UID {
+			return true
+		}
+	}
+
 	podRevision := utils.PodRevision(pod)
 	servingGroup := c.store.GetServingGroup(types.NamespacedName{
 		Namespace: ms.Namespace,
