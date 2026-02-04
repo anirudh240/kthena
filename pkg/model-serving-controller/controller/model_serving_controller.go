@@ -1437,16 +1437,6 @@ func (c *ModelServingController) handleDeletionInProgress(ms *workloadv1alpha1.M
 				// role has been deleted, so the storage needs to be updated and need to reconcile.
 				klog.V(2).Infof("role %s of servingGroup %s has been deleted", roleID, servingGroupName)
 				c.store.DeleteRole(utils.GetNamespaceName(ms), servingGroupName, roleName, roleID)
-				groupReady, err := c.checkServingGroupReady(ms, servingGroupName)
-				if err != nil {
-					klog.Errorf("failed to check servingGroup %s ready status: %v", servingGroupName, err)
-				}
-				if groupReady {
-					err := c.store.UpdateServingGroupStatus(utils.GetNamespaceName(ms), servingGroupName, datastore.ServingGroupRunning)
-					if err != nil {
-						klog.Errorf("failed to set ServingGroup %s/%s status: %v", ms.Namespace+"/"+ms.Name, servingGroupName, err)
-					}
-				}
 				c.enqueueModelServing(ms)
 			}
 			return true
