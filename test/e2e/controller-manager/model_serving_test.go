@@ -562,17 +562,16 @@ func TestModelServingControllerManagerRestart(t *testing.T) {
 	// Wait briefly for initial reconciliation to start
 	t.Log("Waiting for initial reconciliation to start...")
 	// Wait for a random duration between 0 and 3 seconds (in 100ms increments)
-	randomWait := time.Duration(rand.Intn(31)*100) * time.Millisecond
+	randomWait := time.Duration(rand.New(rand.NewSource(time.Now().UnixNano())).Intn(31)*100) * time.Millisecond
 	t.Logf("Waiting for %v before restarting controller-manager", randomWait)
 	time.Sleep(randomWait)
 
 	// Find and delete controller-manager pods
-	controllerNamespace := kthenaNamespace
-	t.Logf("Finding controller-manager pods in namespace %s", controllerNamespace)
+	t.Logf("Finding controller-manager pods in namespace %s", kthenaNamespace)
 
 	// Use label selector to find controller-manager pods
 	labelSelector := "app.kubernetes.io/component=kthena-controller-manager"
-	controllerPods, err := kubeClient.CoreV1().Pods(controllerNamespace).List(ctx, metav1.ListOptions{
+	controllerPods, err := kubeClient.CoreV1().Pods(kthenaNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	require.NoError(t, err, "Failed to list controller-manager pods")
@@ -581,14 +580,14 @@ func TestModelServingControllerManagerRestart(t *testing.T) {
 	// Delete all controller-manager pods
 	for _, pod := range controllerPods.Items {
 		t.Logf("Deleting controller-manager pod: %s", pod.Name)
-		err := kubeClient.CoreV1().Pods(controllerNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+		err := kubeClient.CoreV1().Pods(kthenaNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
 		require.NoError(t, err, "Failed to delete controller-manager pod %s", pod.Name)
 	}
 
 	// Wait for controller-manager pods to restart and become ready
 	t.Log("Waiting for controller-manager to restart...")
 	require.Eventually(t, func() bool {
-		pods, err := kubeClient.CoreV1().Pods(controllerNamespace).List(ctx, metav1.ListOptions{
+		pods, err := kubeClient.CoreV1().Pods(kthenaNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector,
 		})
 		if err != nil {
