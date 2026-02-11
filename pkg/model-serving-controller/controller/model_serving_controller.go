@@ -36,8 +36,11 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -81,12 +84,18 @@ type ModelServingController struct {
 	graceMap        sync.Map // key: errorPod.namespace/errorPod.name, value:time
 	initialSync     bool     // indicates whether the initial sync has been completed
 	pluginsRegistry *plugins.Registry
+	recorder        record.EventRecorder
 }
 
 func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingClient clientset.Interface, volcanoClient volcano.Interface, apiextClient apiextClientSet.Interface) (*ModelServingController, error) {
 	selector, err := labels.NewRequirement(workloadv1alpha1.GroupNameLabelKey, selection.Exists, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create label selector, err: %v", err)
+	}
+
+	// Register ModelServing types in the global scheme for event recording.
+	if err := workloadv1alpha1.Install(scheme.Scheme); err != nil {
+		return nil, fmt.Errorf("failed to register ModelServing API scheme: %v", err)
 	}
 
 	kubeInformerFactory := informers.NewSharedInformerFactoryWithOptions(
@@ -118,6 +127,18 @@ func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingC
 	}
 
 	store := datastore.New()
+
+	// setup event broadcaster & recorder
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{
+		Interface: kubeClientSet.CoreV1().Events(""),
+	})
+	recorder := eventBroadcaster.NewRecorder(
+		scheme.Scheme,
+		corev1.EventSource{Component: "modelserving-controller"},
+	)
+
 	c := &ModelServingController{
 		kubeClientSet:         kubeClientSet,
 		modelServingClient:    modelServingClient,
@@ -132,6 +153,7 @@ func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingC
 		workqueue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ModelServings"),
 		store:           store,
 		pluginsRegistry: plugins.DefaultRegistry,
+		recorder:        recorder,
 	}
 
 	registerPodGroupHandler := func(pgInformer cache.SharedIndexInformer) {
@@ -832,7 +854,11 @@ func (c *ModelServingController) scaleUpRoles(ctx context.Context, ms *workloadv
 			klog.Errorf("create role %s for ServingGroup %s failed: %v", utils.GenerateRoleID(targetRole.Name, newIndex), groupName, err)
 		} else {
 			// Insert new Role to global storage
-			c.store.AddRole(utils.GetNamespaceName(ms), groupName, targetRole.Name, utils.GenerateRoleID(targetRole.Name, newIndex), newRevision)
+			roleID := utils.GenerateRoleID(targetRole.Name, newIndex)
+			c.store.AddRole(utils.GetNamespaceName(ms), groupName, targetRole.Name, roleID, newRevision)
+			// Emit event for new role entering Creating state
+			message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Creating", targetRole.Name, roleID, groupName)
+			c.emitRoleStatusEvent(ms, corev1.EventTypeNormal, "RoleCreating", message)
 		}
 	}
 }
@@ -890,6 +916,18 @@ func (c *ModelServingController) manageRoleReplicas(ctx context.Context, ms *wor
 	}
 }
 
+// emitRoleStatusEvent emits a Kubernetes Event for a role-related status change.
+// It is intentionally lightweight and no-op when recorder is not initialized.
+func (c *ModelServingController) emitRoleStatusEvent(
+	ms *workloadv1alpha1.ModelServing,
+	eventType, reason, message string,
+) {
+	if c == nil || c.recorder == nil || ms == nil {
+		return
+	}
+	c.recorder.Event(ms, eventType, reason, message)
+}
+
 func (c *ModelServingController) getModelServingAndResourceDetails(resource metav1.Object) (*workloadv1alpha1.ModelServing, string, string, string) {
 	ms, servingGroupName, err := c.getModelServingByChildResource(resource)
 	if err != nil {
@@ -923,6 +961,9 @@ func (c *ModelServingController) DeleteRole(ctx context.Context, ms *workloadv1a
 		klog.Errorf("failed to set role %s/%s status: %v", groupName, roleID, err)
 		return
 	}
+	// Emit event for role entering Deleting state.
+	message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Deleting", roleName, roleID, groupName)
+	c.emitRoleStatusEvent(ms, corev1.EventTypeNormal, "RoleDeleting", message)
 	var deleteErr error
 	defer func() {
 		if deleteErr == nil {
@@ -1084,6 +1125,9 @@ func (c *ModelServingController) handleReadyPod(ms *workloadv1alpha1.ModelServin
 				klog.Warningf("failed to update role %s/%s status to Running: %v", roleName, roleID, err)
 			} else {
 				klog.V(2).Infof("Update role %s/%s status to Running", roleName, roleID)
+				// Emit event for role transitioning to Running
+				message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Running", roleName, roleID, servingGroupName)
+				c.emitRoleStatusEvent(ms, corev1.EventTypeNormal, "RoleRunning", message)
 			}
 		}
 	}
@@ -1132,6 +1176,9 @@ func (c *ModelServingController) handleErrorPod(ms *workloadv1alpha1.ModelServin
 			klog.Warningf("failed to update role %s/%s status to Creating: %v", roleName, roleID, err)
 		} else {
 			klog.V(2).Infof("update role %s/%s to Creating when pod fails", roleName, roleID)
+			// Emit event for role re-entering Creating state due to failure
+			message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Creating", roleName, roleID, servingGroupName)
+			c.emitRoleStatusEvent(ms, corev1.EventTypeNormal, "RoleCreating", message)
 		}
 	}
 
@@ -1833,6 +1880,9 @@ func (c *ModelServingController) CreatePodsForServingGroup(ctx context.Context, 
 			}
 			roleID := utils.GenerateRoleID(role.Name, i)
 			c.store.AddRole(utils.GetNamespaceName(ms), servingGroupName, role.Name, roleID, revision)
+			// Emit event for new role entering Creating state
+			message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Creating", role.Name, roleID, servingGroupName)
+			c.emitRoleStatusEvent(ms, corev1.EventTypeNormal, "RoleCreating", message)
 		}
 	}
 	return nil
