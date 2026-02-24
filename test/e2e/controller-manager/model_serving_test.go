@@ -416,7 +416,7 @@ func TestModelServingRollingUpdateMaxUnavailable(t *testing.T) {
 								Containers: []corev1.Container{
 									{
 										Name:  "test-container",
-										Image: "nginx:latest", // Initial image
+										Image: "nginx:1.28.2", // Initial image
 										Ports: []corev1.ContainerPort{
 											{
 												Name:          "http",
@@ -434,7 +434,7 @@ func TestModelServingRollingUpdateMaxUnavailable(t *testing.T) {
 								Containers: []corev1.Container{
 									{
 										Name:  "worker-dummy",
-										Image: "nginx:latest",
+										Image: "nginx:1.28.2",
 									},
 								},
 							},
@@ -659,7 +659,7 @@ func createRole(name string, roleReplicas, workerReplicas int32) workload.Role {
 				Containers: []corev1.Container{
 					{
 						Name:  "test-container",
-						Image: "nginx:latest",
+						Image: "nginx:1.28.2",
 						Ports: []corev1.ContainerPort{
 							{
 								Name:          "http",
@@ -676,7 +676,7 @@ func createRole(name string, roleReplicas, workerReplicas int32) workload.Role {
 				Containers: []corev1.Container{
 					{
 						Name:  "worker-container",
-						Image: "nginx:latest",
+						Image: "nginx:1.28.2",
 						Ports: []corev1.ContainerPort{
 							{
 								Name:          "http",
@@ -703,7 +703,7 @@ func createBasicModelServing(name string, servingGroupReplicas int32, roles ...w
 						Containers: []corev1.Container{
 							{
 								Name:  "test-container",
-								Image: "nginx:latest",
+								Image: "nginx:1.28.2",
 								Ports: []corev1.ContainerPort{
 									{
 										Name:          "http",
@@ -721,7 +721,7 @@ func createBasicModelServing(name string, servingGroupReplicas int32, roles ...w
 						Containers: []corev1.Container{
 							{
 								Name:  "worker-dummy",
-								Image: "nginx:latest",
+								Image: "nginx:1.28.2",
 							},
 						},
 					},
@@ -763,7 +763,7 @@ func createInvalidModelServing() *workload.ModelServing {
 								Containers: []corev1.Container{
 									{
 										Name:  "test",
-										Image: "nginx:latest",
+										Image: "nginx:1.28.2",
 									},
 								},
 							},
@@ -775,7 +775,7 @@ func createInvalidModelServing() *workload.ModelServing {
 								Containers: []corev1.Container{
 									{
 										Name:  "worker-dummy",
-										Image: "nginx:latest",
+										Image: "nginx:1.28.2",
 									},
 								},
 							},
