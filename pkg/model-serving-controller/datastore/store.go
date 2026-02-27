@@ -298,6 +298,10 @@ func (s *store) AddServingGroup(modelServingName types.NamespacedName, idx int, 
 	if _, ok := s.servingGroup[modelServingName]; !ok {
 		s.servingGroup[modelServingName] = make(map[string]*ServingGroup)
 	}
+
+	if _, ok := s.servingGroup[modelServingName][newGroup.Name]; ok {
+		return
+	}
 	s.servingGroup[modelServingName][newGroup.Name] = newGroup
 }
 
