@@ -883,31 +883,13 @@ func (c *ModelServingController) scaleUpRoles(ctx context.Context, ms *workloadv
 	// Create new Roles with increasing indices
 	for i := 0; i < toCreate; i++ {
 		newIndex := startingIndex + i
-		roleID := utils.GenerateRoleID(targetRole.Name, newIndex)
-
-		// Guard against TOCTOU race: the roleList snapshot from GetRoleList may be stale by the time
-		// we reach here. Concurrent handleDefault calls may have already registered pods for this
-		// roleID via AddServingGroupAndRole. Check the pod lister index first to avoid creating
-		// duplicate pods.
-		roleIDValue := fmt.Sprintf("%s/%s/%s/%s", ms.Namespace, groupName, targetRole.Name, roleID)
-		existingPods, err := c.getPodsByIndex(RoleIDKey, roleIDValue)
-		if err != nil {
-			klog.Warningf("failed to check existing pods for role %s in ServingGroup %s: %v; proceeding with creation", roleID, groupName, err)
-		}
-		if len(existingPods) > 0 {
-			// Pods already exist, registered by a concurrent event handler (addPod/updatePod) which
-			// already called AddServingGroupAndRole. Calling AddRole here would be redundant and
-			// harmful: AddRole unconditionally resets the role status to RoleCreating, potentially
-			// overwriting a RoleRunning status set by the concurrent handler.
-			klog.V(4).Infof("skipping pod creation for role %s in ServingGroup %s: %d pod(s) already exist", roleID, groupName, len(existingPods))
-			continue
-		}
-
 		// Create pods for role
-		if err := c.CreatePodsByRole(ctx, *targetRole.DeepCopy(), ms, newIndex, servingGroupOrdinal, newRevision); err != nil {
-			klog.Errorf("create role %s for ServingGroup %s failed: %v", roleID, groupName, err)
+		err := c.CreatePodsByRole(ctx, *targetRole.DeepCopy(), ms, newIndex, servingGroupOrdinal, newRevision)
+		if err != nil {
+			klog.Errorf("create role %s for ServingGroup %s failed: %v", utils.GenerateRoleID(targetRole.Name, newIndex), groupName, err)
 		} else {
 			// Insert new Role to global storage
+			roleID := utils.GenerateRoleID(targetRole.Name, newIndex)
 			c.store.AddRole(utils.GetNamespaceName(ms), groupName, targetRole.Name, roleID, newRevision)
 			// Emit event for new role entering Creating state
 			message := fmt.Sprintf("Role %s/%s in ServingGroup %s is now Creating", targetRole.Name, roleID, groupName)
