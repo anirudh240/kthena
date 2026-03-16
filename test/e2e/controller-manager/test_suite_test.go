@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,27 +124,29 @@ func setupControllerManagerE2ETest(t *testing.T) (context.Context, *clientset.Cl
 	return ctx, kthenaClient, kubeClient
 }
 
-func waitForWebhookReady(t *testing.T, kubeClient *kubernetes.Clientset, kthenaNamespace string) {
+func waitForWebhookReady(t *testing.T, kthenaClient *clientset.Clientset, namespace string) {
 	t.Helper()
-	t.Log("Waiting for webhook server to be ready")
+	t.Log("Waiting for webhook server to accept requests")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) (bool, error) {
-		ep, err := kubeClient.CoreV1().Endpoints(kthenaNamespace).Get(ctx, "kthena-controller-manager-webhook", metav1.GetOptions{})
+		probe := createValidModelBoosterForWebhookTest()
+		probe.Namespace = namespace
+		probe.Name = "webhook-ready-probe-" + utils.RandomString(5)
 
+		_, err := kthenaClient.WorkloadV1alpha1().ModelBoosters(namespace).Create(ctx, probe, metav1.CreateOptions{DryRun: []string{"All"}})
 		if err != nil {
-			t.Logf("Webhook endpoint not ready yet: %v", err)
-			return false, nil
-		}
-		for _, subset := range ep.Subsets {
-			if len(subset.Addresses) > 0 {
-				return true, nil
+			errStr := err.Error()
+			if strings.Contains(errStr, "connect: connection refused") {
+				t.Logf("Webhook not ready yet (connection refused), retrying: %v", err)
+				return false, nil
 			}
+			return false, err
 		}
-		t.Log("Webhook has no ready addresses yet")
-		return false, nil
+
+		return true, nil
 	})
 	require.NoError(t, err, "Webhook did not become ready in time")
 }

@@ -28,10 +28,10 @@ import (
 
 // TestWebhook tests that the webhooks (validation and mutation) work as expected.
 func TestWebhook(t *testing.T) {
-	ctx, kthenaClient, kubeClient := setupControllerManagerE2ETest(t)
+	ctx, kthenaClient, _ := setupControllerManagerE2ETest(t)
 
 	// waiting for webhook to be ready before running tests
-	waitForWebhookReady(t, kubeClient, kthenaNamespace)
+	waitForWebhookReady(t, kthenaClient, testNamespace)
 
 	testCases := []struct {
 		name          string
