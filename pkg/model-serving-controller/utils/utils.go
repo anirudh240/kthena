@@ -411,7 +411,7 @@ func SetCondition(ms *workloadv1alpha1.ModelServing, progressingGroups, updatedG
 	shouldUpdate := false
 
 	partition := 0
-	if ms.Spec.RolloutStrategy != nil && ms.Spec.RolloutStrategy.RollingUpdateConfiguration != nil && ms.Spec.RolloutStrategy.RollingUpdateConfiguration.Partition != nil {
+	if ms.Spec.RolloutStrategy != nil && ms.Spec.RolloutStrategy.RollingUpdateConfiguration != nil && ms.Spec.RolloutStrategy.RollingUpdateConfiguration.Partition != nil && ms.Spec.Replicas != nil {
 		replicas := int(*ms.Spec.Replicas)
 		partitionValue, err := intstr.GetScaledValueFromIntOrPercent(ms.Spec.RolloutStrategy.RollingUpdateConfiguration.Partition, replicas, true)
 		if err != nil {

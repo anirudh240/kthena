@@ -160,13 +160,15 @@ func validateRollingUpdateConfiguration(ms *workloadv1alpha1.ModelServing) field
 		}
 	}
 
-	maxUnavailableValue, err := intstr.GetScaledValueFromIntOrPercent(maxUnavailable, int(*ms.Spec.Replicas), false)
-	if err != nil {
-		allErrs = append(allErrs, field.Invalid(maxUnavailablePath, maxUnavailable, "invalidate maxUnavailable"))
-	} else if maxUnavailableValue == 0 {
-		allErrs = append(allErrs, field.Invalid(field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration"),
-			"",
-			"maxUnavailable cannot be 0"))
+	if ms.Spec.Replicas != nil {
+		maxUnavailableValue, err := intstr.GetScaledValueFromIntOrPercent(maxUnavailable, int(*ms.Spec.Replicas), false)
+		if err != nil {
+			allErrs = append(allErrs, field.Invalid(maxUnavailablePath, maxUnavailable, "invalidate maxUnavailable"))
+		} else if maxUnavailableValue == 0 {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("spec").Child("rolloutStrategy").Child("rollingUpdateConfiguration"),
+				"",
+				"maxUnavailable cannot be 0"))
+		}
 	}
 	return allErrs
 }
