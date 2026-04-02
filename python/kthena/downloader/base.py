@@ -86,6 +86,14 @@ def get_downloader(source: str, config: dict, max_workers: int = 8) -> ModelDown
             from kthena.downloader.pvc import PVCDownloader
 
             return PVCDownloader(source_path=source)
+        elif source.startswith("ms://"):
+            from kthena.downloader.modelscope_downloader import ModelScopeDownloader
+
+            return ModelScopeDownloader(
+                model_uri=source.removeprefix("ms://"),
+                ms_token=config.get("ms_token"),
+                ms_revision=config.get("ms_revision"),
+            )
         else:
             from kthena.downloader.huggingface import HuggingFaceDownloader
 
