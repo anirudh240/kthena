@@ -43,6 +43,12 @@ type FairnessQueueConfig struct {
 
 	// RebuildThreshold controls when to refresh all queued priorities and rebuild the heap.
 	RebuildThreshold int
+
+	// TokenWeight is the token-usage weight in the composite priority score.
+	TokenWeight float64
+
+	// RequestNumWeight is the request-count weight in the composite priority score.
+	RequestNumWeight float64
 }
 
 // DefaultFairnessQueueConfig returns backward-compatible defaults.
@@ -52,7 +58,33 @@ func DefaultFairnessQueueConfig() FairnessQueueConfig {
 		MaxQPS:                    100,
 		MaxPriorityRefreshRetries: 0,
 		RebuildThreshold:          64,
+		TokenWeight:               1.0,
+		RequestNumWeight:          0.0,
 	}
+}
+
+type FairnessPrioritySource interface {
+	GetTokenCount(user, model string) (float64, error)
+	GetRequestCount(user, model string) (int, error)
+}
+
+func CalculateFairnessPriority(source FairnessPrioritySource, userID, modelName string, tokenWeight, requestNumWeight float64) (float64, error) {
+	tokenCount, err := source.GetTokenCount(userID, modelName)
+	if err != nil {
+		return 0, err
+	}
+
+	priority := tokenWeight * tokenCount
+	if requestNumWeight == 0 {
+		return priority, nil
+	}
+
+	requestCount, err := source.GetRequestCount(userID, modelName)
+	if err != nil {
+		return 0, err
+	}
+
+	return priority + requestNumWeight*float64(requestCount), nil
 }
 
 // Request represents a request item in the priority queue
@@ -63,8 +95,8 @@ type Request struct {
 	Priority    float64 // Priority (lower value means higher priority)
 	RequestTime time.Time
 	NotifyChan  chan struct{}
-	Ctx         context.Context // Request-scoped context for cancellation and timeout
-	DoneChan    chan struct{}   // Closed by router after proxy completes (releases permit)
+	CancelCh    <-chan struct{} // Request-scoped cancellation signal
+	Release     func()          // Set by the queue when a permit is acquired
 }
 
 // RequestPriorityQueue implements the heap.Interface
@@ -94,6 +126,9 @@ func NewRequestPriorityQueue(metricsInstance *metrics.Metrics) *RequestPriorityQ
 func NewRequestPriorityQueueWithConfig(metricsInstance *metrics.Metrics, cfg FairnessQueueConfig, tracker TokenTracker) *RequestPriorityQueue {
 	if metricsInstance == nil {
 		metricsInstance = metrics.DefaultMetrics
+	}
+	if cfg.TokenWeight == 0 && cfg.RequestNumWeight == 0 {
+		cfg.TokenWeight = DefaultFairnessQueueConfig().TokenWeight
 	}
 	pq := &RequestPriorityQueue{
 		stopCh:       make(chan struct{}),
@@ -173,7 +208,7 @@ func (pq *RequestPriorityQueue) popWhenAvailable(ctx context.Context) (*Request,
 			req := heap.Pop(pq).(*Request)
 
 			// Skip cancelled/timed-out requests
-			if req.Ctx != nil && req.Ctx.Err() != nil {
+			if req.isCancelled() {
 				if pq.metrics != nil {
 					pq.metrics.DecFairnessQueueSize(req.ModelName, req.UserID)
 					queueDuration := time.Since(req.RequestTime)
@@ -186,28 +221,35 @@ func (pq *RequestPriorityQueue) popWhenAvailable(ctx context.Context) (*Request,
 
 			// Bounded priority refresh: re-evaluate root priority at dequeue time
 			if pq.tokenTracker != nil && pq.config.MaxPriorityRefreshRetries > 0 {
-				newPri, err := pq.tokenTracker.GetTokenCount(req.UserID, req.ModelName)
+				newPri, err := CalculateFairnessPriority(
+					pq.tokenTracker,
+					req.UserID,
+					req.ModelName,
+					pq.config.TokenWeight,
+					pq.config.RequestNumWeight,
+				)
 				if err == nil && newPri != req.Priority {
 					req.Priority = newPri
 					// Check if this request should still be dequeued
 					if len(pq.heap) > 0 && newPri > pq.heap[0].Priority {
 						refreshRetries++
+						if pq.metrics != nil {
+							pq.metrics.IncFairnessQueuePriorityRefresh(req.ModelName)
+						}
 						if refreshRetries >= pq.config.MaxPriorityRefreshRetries {
-							// Rebuild the entire heap with refreshed priorities
 							heap.Push(pq, req)
-							pq.rebuildHeap()
-							refreshRetries = 0
-							if pq.metrics != nil {
-								pq.metrics.IncFairnessQueueHeapRebuild(req.ModelName)
+							if pq.shouldRebuildLocked() {
+								pq.rebuildHeap()
+								if pq.metrics != nil {
+									pq.metrics.IncFairnessQueueHeapRebuild(req.ModelName)
+								}
 							}
+							refreshRetries = 0
 							pq.mu.Unlock()
 							continue
 						}
 						// Reinsert with updated priority and retry
 						heap.Push(pq, req)
-						if pq.metrics != nil {
-							pq.metrics.IncFairnessQueuePriorityRefresh(req.ModelName)
-						}
 						pq.mu.Unlock()
 						continue
 					}
@@ -240,6 +282,22 @@ func (pq *RequestPriorityQueue) popWhenAvailable(ctx context.Context) (*Request,
 	}
 }
 
+func (r *Request) isCancelled() bool {
+	if r == nil || r.CancelCh == nil {
+		return false
+	}
+	select {
+	case <-r.CancelCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (pq *RequestPriorityQueue) shouldRebuildLocked() bool {
+	return pq.config.RebuildThreshold <= 0 || len(pq.heap) <= pq.config.RebuildThreshold
+}
+
 // rebuildHeap refreshes priorities for all queued items and rebuilds the heap.
 // Caller must hold pq.mu.
 func (pq *RequestPriorityQueue) rebuildHeap() {
@@ -247,7 +305,13 @@ func (pq *RequestPriorityQueue) rebuildHeap() {
 		return
 	}
 	for _, req := range pq.heap {
-		if newPri, err := pq.tokenTracker.GetTokenCount(req.UserID, req.ModelName); err == nil {
+		if newPri, err := CalculateFairnessPriority(
+			pq.tokenTracker,
+			req.UserID,
+			req.ModelName,
+			pq.config.TokenWeight,
+			pq.config.RequestNumWeight,
+		); err == nil {
 			req.Priority = newPri
 		}
 	}
@@ -258,7 +322,7 @@ func (pq *RequestPriorityQueue) rebuildHeap() {
 // gated by available capacity. Otherwise, it falls back to QPS-based ticker dequeue.
 func (pq *RequestPriorityQueue) Run(ctx context.Context, qps int) {
 	if pq.sem != nil {
-		pq.runSemaphoreMode(ctx, qps)
+		pq.runSemaphoreMode(ctx)
 		return
 	}
 	pq.runQPSMode(ctx, qps)
@@ -291,15 +355,7 @@ func (pq *RequestPriorityQueue) runQPSMode(ctx context.Context, qps int) {
 }
 
 // runSemaphoreMode dequeues based on available backend capacity.
-func (pq *RequestPriorityQueue) runSemaphoreMode(ctx context.Context, qps int) {
-	// Optional QPS cap on top of semaphore
-	var ticker *time.Ticker
-	if qps > 0 {
-		interval := time.Second / time.Duration(qps)
-		ticker = time.NewTicker(interval)
-		defer ticker.Stop()
-	}
-
+func (pq *RequestPriorityQueue) runSemaphoreMode(ctx context.Context) {
 	for {
 		// Acquire semaphore permit (blocks if at capacity)
 		select {
@@ -311,19 +367,6 @@ func (pq *RequestPriorityQueue) runSemaphoreMode(ctx context.Context, qps int) {
 			// Permit acquired
 		}
 
-		// Optional QPS rate cap
-		if ticker != nil {
-			select {
-			case <-ctx.Done():
-				<-pq.sem // release permit
-				return
-			case <-pq.stopCh:
-				<-pq.sem // release permit
-				return
-			case <-ticker.C:
-			}
-		}
-
 		req, err := pq.popWhenAvailable(ctx)
 		if err != nil {
 			<-pq.sem // release permit
@@ -331,29 +374,27 @@ func (pq *RequestPriorityQueue) runSemaphoreMode(ctx context.Context, qps int) {
 		}
 
 		if req != nil && req.NotifyChan != nil {
-			close(req.NotifyChan)
+			releaseOnce := sync.Once{}
+			trackedInflight := false
+			req.Release = func() {
+				releaseOnce.Do(func() {
+					<-pq.sem
+					if trackedInflight && pq.metrics != nil {
+						pq.metrics.DecFairnessQueueInflight(req.ModelName)
+					}
+				})
+			}
+
+			if req.isCancelled() {
+				req.Release()
+				continue
+			}
 
 			if pq.metrics != nil {
 				pq.metrics.IncFairnessQueueInflight(req.ModelName)
 			}
-
-			// Release permit when the request completes
-			go func(r *Request) {
-				defer func() {
-					<-pq.sem
-					if pq.metrics != nil {
-						pq.metrics.DecFairnessQueueInflight(r.ModelName)
-					}
-				}()
-				if r.DoneChan != nil {
-					select {
-					case <-r.DoneChan:
-					case <-r.Ctx.Done():
-					}
-				} else if r.Ctx != nil {
-					<-r.Ctx.Done()
-				}
-			}(req)
+			trackedInflight = true
+			close(req.NotifyChan)
 		} else {
 			<-pq.sem // release permit for nil/no-notify requests
 		}
@@ -361,7 +402,7 @@ func (pq *RequestPriorityQueue) runSemaphoreMode(ctx context.Context, qps int) {
 }
 
 // Close stops the dequeue loop and drains pending items from the heap.
-// Callers waiting on NotifyChan will detect cancellation via their request-scoped Ctx.
+// Callers waiting on NotifyChan will detect cancellation via their request-scoped signal.
 func (pq *RequestPriorityQueue) Close() {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()

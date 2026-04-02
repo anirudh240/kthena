@@ -341,6 +341,22 @@ func createFairnessQueueConfig() FairnessQueueConfig {
 		}
 	}
 
+	if v := os.Getenv("FAIRNESS_PRIORITY_ALPHA"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.TokenWeight = n
+		} else {
+			klog.Warningf("Invalid FAIRNESS_PRIORITY_ALPHA: %q, using default %v", v, cfg.TokenWeight)
+		}
+	}
+
+	if v := os.Getenv("FAIRNESS_PRIORITY_BETA"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.RequestNumWeight = n
+		} else {
+			klog.Warningf("Invalid FAIRNESS_PRIORITY_BETA: %q, using default %v", v, cfg.RequestNumWeight)
+		}
+	}
+
 	return cfg
 }
 
@@ -392,7 +408,11 @@ func (s *store) Enqueue(req *Request) error {
 				klog.Warning("store.Enqueue called before Run(); using background context for queue")
 				queueCtx = context.Background()
 			}
-			go newQueue.Run(queueCtx, s.fairnessQueueConfig.MaxQPS)
+			queueQPS := s.fairnessQueueConfig.MaxQPS
+			if s.fairnessQueueConfig.MaxConcurrent > 0 {
+				queueQPS = 0
+			}
+			go newQueue.Run(queueCtx, queueQPS)
 		}
 		queue, _ = val.(*RequestPriorityQueue)
 	}

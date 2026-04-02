@@ -38,10 +38,10 @@
 │      │ <── blocks on NotifyChan (max 60s) ──┐                          │
 │      │                                      │                          │
 │      ▼                               ┌──────┴──────┐                   │
-│  ┌──────────┐                        │  Run() loop  │                   │
-│  │doLoadbal │◀── close(NotifyChan) ──│  ticker @    │                   │
-│  │  ance()  │                        │  10ms/tick   │                   │
-│  └──────────┘                        └─────────────┘                   │
+│  ┌───────────────┐                   │  Run() loop  │                   │
+│  │doLoadbalance()│◀── close(NotifyChan) ──│  ticker @    │              │
+│  └───────────────┘                   │  10ms/tick   │                   │
+│                                      └─────────────┘                   │
 │      │                                                                 │
 │      ▼                                                                 │
 │  ┌──────────┐    ┌──────────────┐                                      │
@@ -63,7 +63,7 @@
 | `RequestPriorityQueue` | `fairness_queue.go` | Min-heap ordered by token usage; per-model goroutine dequeues at fixed QPS |
 | `InMemorySlidingWindowTokenTracker` | `token_tracker.go` | Sliding-window weighted token accumulator per (user, model) |
 | `EnableFairnessScheduling` | `router.go:68` | Global env-var kill switch (`ENABLE_FAIRNESS_SCHEDULING`) |
-| Metrics | `metrics.go` | `fairness_queue_size`, `fairness_queue_duration_seconds` |
+| Metrics | `metrics.go` | `kthena_router_fairness_queue_size`, `kthena_router_fairness_queue_duration_seconds` |
 
 ---
 
@@ -220,7 +220,7 @@ On request completion (new callback):
     4. Release semaphore permit → unblocks next dequeue
 ```
 
-**Permit lifecycle requirement:** The permit must be released on every exit path after dequeue, including proxy success, proxy error, request timeout, streaming disconnect, and retry exhaustion. The implementation should have a single owner for permit release so capacity cannot leak.
+**Permit lifecycle requirement:** The permit must be released on every exit path after dequeue, including proxy success, proxy error, request timeout, streaming disconnect, and retry exhaustion. The implementation should have a single owner for permit release, ideally via a single `defer req.Release()` in the handler after dequeue, so capacity cannot leak.
 
 **Capacity source:** `MaxConcurrent` can be derived from:
 - Static configuration per model (simplest, recommended first).
@@ -233,7 +233,7 @@ On request completion (new callback):
 ```go
 type Request struct {
     // ... existing fields ...
-    DoneChan chan struct{} // Closed by router after proxy completes (releases permit)
+    Release func() // Assigned by the queue after dequeue; called by the handler once
 }
 ```
 
@@ -267,7 +267,7 @@ MaxPriorityRefreshRetries int // default: 2
 RebuildThreshold int // default: 64
 ```
 
-**Tradeoff:** This is still an approximation of ideal fairness, but it is a bounded and explicit one. The proposal should describe it as a practical mitigation, not as a proof of exact dequeue optimality.
+**Tradeoff:** This is still an approximation of ideal fairness, but it is a bounded and explicit one. The proposal should describe it as a practical mitigation, not as a proof of exact dequeue optimality. To avoid `heap.Init` becoming a hot-path bottleneck, full heap rebuilds should remain gated by a queue-size threshold; above that threshold the system should continue with incremental refresh-and-reinsert only.
 
 ### 4.3 Request Cancellation Support (Addresses Gap 3)
 
@@ -275,19 +275,19 @@ RebuildThreshold int // default: 64
 
 **Design:**
 
-Add a request-scoped context to `Request`:
+Keep the request-scoped `context.Context` in the handler, but only store its cancellation signal on the queue item:
 
 ```go
 type Request struct {
     // ... existing fields ...
-    Ctx context.Context // Derived from c.Request.Context(); carries client and timeout lifecycle
+    CancelCh <-chan struct{} // Derived from reqCtx.Done(); carries client and timeout lifecycle
 }
 ```
 
 **Three-point cancellation:**
 
-1. **At enqueue:** Create `reqCtx, cancel := context.WithTimeout(c.Request.Context(), r.fairnessTimeout)` and store `reqCtx` in the `Request`.
-2. **At dequeue (in `popWhenAvailable`):** After popping, check `req.Ctx.Err() != nil`. If cancelled, skip (decrement metrics, continue to next).
+1. **At enqueue:** Create `reqCtx, cancel := context.WithTimeout(c.Request.Context(), r.fairnessTimeout)` and store `reqCtx.Done()` in the `Request`.
+2. **At dequeue (in `popWhenAvailable`):** After popping, check whether `req.CancelCh` is closed. If cancelled, skip (decrement metrics, continue to next).
 3. **At wait site (in `handleFairnessScheduling`):** Wait on the same request context used by the queue:
 
 ```go

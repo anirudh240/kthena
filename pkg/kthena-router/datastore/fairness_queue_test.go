@@ -397,7 +397,7 @@ func TestPopWhenAvailable_SkipsCancelledRequests(t *testing.T) {
 	cancel() // cancel immediately
 
 	requests := []*Request{
-		{ReqID: "cancelled-req", UserID: "user1", Priority: 0.5, RequestTime: now, Ctx: cancelledCtx},
+		{ReqID: "cancelled-req", UserID: "user1", Priority: 0.5, RequestTime: now, CancelCh: cancelledCtx.Done()},
 		{ReqID: "valid-req", UserID: "user2", Priority: 1.0, RequestTime: now.Add(time.Second)},
 	}
 
@@ -428,7 +428,7 @@ func TestPopWhenAvailable_SkipsTimedOutRequests(t *testing.T) {
 	defer cancel()
 
 	requests := []*Request{
-		{ReqID: "expired-req", UserID: "user1", Priority: 0.5, RequestTime: now, Ctx: expiredCtx},
+		{ReqID: "expired-req", UserID: "user1", Priority: 0.5, RequestTime: now, CancelCh: expiredCtx.Done()},
 		{ReqID: "fresh-req", UserID: "user2", Priority: 1.0, RequestTime: now.Add(time.Second)},
 	}
 
@@ -521,14 +521,10 @@ func TestRun_SemaphoreMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	requestCtx := context.Background()
-	// Push 4 requests with DoneChan
-	doneChs := make([]chan struct{}, 4)
+	requests := make([]*Request, 4)
 	notifyChs := make([]chan struct{}, 4)
 	for i := 0; i < 4; i++ {
-		doneCh := make(chan struct{})
 		notifyCh := make(chan struct{})
-		doneChs[i] = doneCh
 		notifyChs[i] = notifyCh
 		req := &Request{
 			ReqID:       fmt.Sprintf("req-%d", i),
@@ -537,9 +533,8 @@ func TestRun_SemaphoreMode(t *testing.T) {
 			Priority:    float64(i),
 			RequestTime: time.Now(),
 			NotifyChan:  notifyCh,
-			DoneChan:    doneCh,
-			Ctx:         requestCtx,
 		}
+		requests[i] = req
 		if err := pq.PushRequest(req); err != nil {
 			t.Fatalf("PushRequest failed: %v", err)
 		}
@@ -565,7 +560,7 @@ func TestRun_SemaphoreMode(t *testing.T) {
 	}
 
 	// Complete first request to release a permit
-	close(doneChs[0])
+	requests[0].Release()
 
 	// Third request should now be dequeued
 	select {
@@ -576,8 +571,8 @@ func TestRun_SemaphoreMode(t *testing.T) {
 	}
 
 	// Complete remaining
-	close(doneChs[1])
-	close(doneChs[2])
+	requests[1].Release()
+	requests[2].Release()
 
 	select {
 	case <-notifyChs[3]:
@@ -585,17 +580,21 @@ func TestRun_SemaphoreMode(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Error("Request 3 should have been dequeued")
 	}
-	close(doneChs[3])
+	requests[3].Release()
 }
 
 // mockTokenTracker implements TokenTracker for testing priority refresh.
 type mockTokenTracker struct {
-	mu     sync.Mutex
-	counts map[string]float64 // key: "user|model"
+	mu            sync.Mutex
+	counts        map[string]float64 // key: "user|model"
+	requestCounts map[string]int
 }
 
 func newMockTokenTracker() *mockTokenTracker {
-	return &mockTokenTracker{counts: make(map[string]float64)}
+	return &mockTokenTracker{
+		counts:        make(map[string]float64),
+		requestCounts: make(map[string]int),
+	}
 }
 
 func (m *mockTokenTracker) SetTokenCount(user, model string, count float64) {
@@ -610,12 +609,20 @@ func (m *mockTokenTracker) GetTokenCount(user, model string) (float64, error) {
 	return m.counts[user+"|"+model], nil
 }
 
+func (m *mockTokenTracker) SetRequestCount(user, model string, count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestCounts[user+"|"+model] = count
+}
+
 func (m *mockTokenTracker) UpdateTokenCount(user, model string, inputTokens, outputTokens float64) error {
 	return nil
 }
 
 func (m *mockTokenTracker) GetRequestCount(user, model string) (int, error) {
-	return 0, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.requestCounts[user+"|"+model], nil
 }
 
 func TestPriorityRefresh_ReinsertOnDrift(t *testing.T) {
@@ -702,7 +709,7 @@ func TestPriorityRefresh_HeapRebuild(t *testing.T) {
 	}
 }
 
-func TestDoneChan_ReleasesPermit(t *testing.T) {
+func TestRelease_ReleasesPermit(t *testing.T) {
 	cfg := FairnessQueueConfig{
 		MaxConcurrent: 1,
 		MaxQPS:        0,
@@ -714,21 +721,21 @@ func TestDoneChan_ReleasesPermit(t *testing.T) {
 	defer cancel()
 
 	// Push 2 requests
-	doneCh1 := make(chan struct{})
 	notifyCh1 := make(chan struct{})
-	pq.PushRequest(&Request{
+	req1 := &Request{
 		ReqID: "req-1", UserID: "user1", ModelName: "m1",
 		Priority: 1.0, RequestTime: time.Now(),
-		NotifyChan: notifyCh1, DoneChan: doneCh1, Ctx: context.Background(),
-	})
+		NotifyChan: notifyCh1,
+	}
+	pq.PushRequest(req1)
 
-	doneCh2 := make(chan struct{})
 	notifyCh2 := make(chan struct{})
-	pq.PushRequest(&Request{
+	req2 := &Request{
 		ReqID: "req-2", UserID: "user2", ModelName: "m1",
 		Priority: 2.0, RequestTime: time.Now(),
-		NotifyChan: notifyCh2, DoneChan: doneCh2, Ctx: context.Background(),
-	})
+		NotifyChan: notifyCh2,
+	}
+	pq.PushRequest(req2)
 
 	go pq.Run(ctx, 0)
 
@@ -746,15 +753,79 @@ func TestDoneChan_ReleasesPermit(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	// Close DoneChan to release permit
-	close(doneCh1)
+	// Release first permit from the handler side
+	req1.Release()
 
 	// Second should now be dequeued
 	select {
 	case <-notifyCh2:
 		// expected
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Second request should have been dequeued after DoneChan close")
+		t.Fatal("Second request should have been dequeued after release")
 	}
-	close(doneCh2)
+	req2.Release()
+}
+
+func TestPriorityRefresh_SkipsHeapRebuildAboveThreshold(t *testing.T) {
+	tracker := newMockTokenTracker()
+	cfg := FairnessQueueConfig{
+		MaxConcurrent:             0,
+		MaxQPS:                    100,
+		MaxPriorityRefreshRetries: 1,
+		RebuildThreshold:          1,
+	}
+	pq := NewRequestPriorityQueueWithConfig(nil, cfg, tracker)
+	defer pq.Close()
+
+	now := time.Now()
+	tracker.SetTokenCount("user-a", "model-1", 1.0)
+	tracker.SetTokenCount("user-b", "model-1", 2.0)
+
+	pq.PushRequest(&Request{ReqID: "a", UserID: "user-a", ModelName: "model-1", Priority: 1.0, RequestTime: now})
+	pq.PushRequest(&Request{ReqID: "b", UserID: "user-b", ModelName: "model-1", Priority: 2.0, RequestTime: now.Add(time.Second)})
+
+	tracker.SetTokenCount("user-a", "model-1", 10.0)
+	tracker.SetTokenCount("user-b", "model-1", 1.5)
+
+	result, err := pq.popWhenAvailable(context.Background())
+	if err != nil {
+		t.Fatalf("popWhenAvailable failed: %v", err)
+	}
+	if result.ReqID != "b" {
+		t.Fatalf("Expected b to be dequeued after refresh, got %s", result.ReqID)
+	}
+}
+
+func TestPriorityRefresh_UsesCompositePriority(t *testing.T) {
+	tracker := newMockTokenTracker()
+	cfg := FairnessQueueConfig{
+		MaxConcurrent:             0,
+		MaxQPS:                    100,
+		MaxPriorityRefreshRetries: 2,
+		RebuildThreshold:          64,
+		TokenWeight:               1.0,
+		RequestNumWeight:          10.0,
+	}
+	pq := NewRequestPriorityQueueWithConfig(nil, cfg, tracker)
+	defer pq.Close()
+
+	now := time.Now()
+	tracker.SetTokenCount("user-a", "model-1", 1.0)
+	tracker.SetTokenCount("user-b", "model-1", 2.0)
+	tracker.SetRequestCount("user-a", "model-1", 0)
+	tracker.SetRequestCount("user-b", "model-1", 0)
+
+	pq.PushRequest(&Request{ReqID: "a", UserID: "user-a", ModelName: "model-1", Priority: 1.0, RequestTime: now})
+	pq.PushRequest(&Request{ReqID: "b", UserID: "user-b", ModelName: "model-1", Priority: 2.0, RequestTime: now.Add(time.Second)})
+
+	tracker.SetRequestCount("user-a", "model-1", 5)
+	tracker.SetRequestCount("user-b", "model-1", 0)
+
+	result, err := pq.popWhenAvailable(context.Background())
+	if err != nil {
+		t.Fatalf("popWhenAvailable failed: %v", err)
+	}
+	if result.ReqID != "b" {
+		t.Fatalf("Expected b to be dequeued after composite refresh, got %s", result.ReqID)
+	}
 }

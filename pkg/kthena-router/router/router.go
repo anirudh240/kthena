@@ -82,9 +82,9 @@ type Router struct {
 	connectorFactory *connectors.Factory
 
 	// Fairness scheduling configuration
-	fairnessTimeout time.Duration
-	priorityAlpha   float64 // Weight for token-based priority (default 1.0)
-	priorityBeta    float64 // Weight for request-count-based priority (default 0.0)
+	fairnessTimeout  time.Duration
+	tokenWeight      float64 // Weight for token-based priority (default 1.0)
+	requestNumWeight float64 // Weight for request-count-based priority (default 0.0)
 }
 
 func NewRouter(store datastore.Store, routerConfigPath string) *Router {
@@ -162,8 +162,8 @@ func NewRouter(store datastore.Store, routerConfigPath string) *Router {
 		tokenizer:        tokenizerInstance,
 		connectorFactory: connectors.NewDefaultFactory(),
 		fairnessTimeout:  parseFairnessTimeout(),
-		priorityAlpha:    parseEnvFloat("FAIRNESS_PRIORITY_ALPHA", 1.0),
-		priorityBeta:     parseEnvFloat("FAIRNESS_PRIORITY_BETA", 0.0),
+		tokenWeight:      parseEnvFloat("FAIRNESS_PRIORITY_ALPHA", 1.0),
+		requestNumWeight: parseEnvFloat("FAIRNESS_PRIORITY_BETA", 0.0),
 	}
 }
 
@@ -187,6 +187,15 @@ func parseEnvFloat(key string, fallback float64) float64 {
 		klog.Warningf("Invalid %s %q, using default %v", key, s, fallback)
 	}
 	return fallback
+}
+
+func (r *Router) calculateRequestPriority(userID, modelName string) float64 {
+	priority, err := datastore.CalculateFairnessPriority(r.store, userID, modelName, r.tokenWeight, r.requestNumWeight)
+	if err != nil {
+		klog.Warningf("failed to calculate fairness priority for user=%s model=%s: %v", userID, modelName, err)
+		return 0
+	}
+	return priority
 }
 
 type ModelRequest map[string]interface{}
@@ -1011,15 +1020,7 @@ func (r *Router) handleFairnessScheduling(c *gin.Context, modelRequest ModelRequ
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), r.fairnessTimeout)
 	defer cancel()
 
-	// Compute composite priority: α × tokenCount + β × requestCount
-	tokenCount, _ := r.store.GetTokenCount(userId, modelName)
-	var pri float64
-	if r.priorityBeta != 0 {
-		reqCount, _ := r.store.GetRequestCount(userId, modelName)
-		pri = r.priorityAlpha*tokenCount + r.priorityBeta*float64(reqCount)
-	} else {
-		pri = r.priorityAlpha * tokenCount
-	}
+	pri := r.calculateRequestPriority(userId, modelName)
 	queueReq := &datastore.Request{
 		ReqID:       requestID,
 		UserID:      userId,
@@ -1027,8 +1028,7 @@ func (r *Router) handleFairnessScheduling(c *gin.Context, modelRequest ModelRequ
 		Priority:    pri,
 		RequestTime: time.Now(),
 		NotifyChan:  make(chan struct{}),
-		Ctx:         reqCtx,
-		DoneChan:    make(chan struct{}),
+		CancelCh:    reqCtx.Done(),
 	}
 
 	if err := r.store.Enqueue(queueReq); err != nil {
@@ -1038,11 +1038,15 @@ func (r *Router) handleFairnessScheduling(c *gin.Context, modelRequest ModelRequ
 
 	select {
 	case <-queueReq.NotifyChan:
-		defer close(queueReq.DoneChan)
+		if queueReq.Release != nil {
+			defer queueReq.Release()
+		}
 		r.doLoadbalance(c, modelRequest)
 		return nil
 	case <-reqCtx.Done():
-		close(queueReq.DoneChan)
+		if queueReq.Release != nil {
+			queueReq.Release()
+		}
 		if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
 			klog.Errorf("request %s timed out in fairness queue after %v", requestID, r.fairnessTimeout)
 			c.AbortWithStatusJSON(http.StatusGatewayTimeout, "Request processing timed out")
