@@ -32,9 +32,7 @@ class TestDownloadModel(unittest.TestCase):
 
     @patch("kthena.downloader.downloader.get_downloader")
     def test_download_model_invalid_credentials(self, mock_get_downloader):
-        self.mock_downloader.download_model.side_effect = ValueError(
-            "Invalid authentication token"
-        )
+        self.mock_downloader.download_model.side_effect = ValueError("Invalid authentication token")
         mock_get_downloader.return_value = self.mock_downloader
 
         with self.assertRaises(ValueError) as context:
@@ -53,9 +51,7 @@ class TestDownloadModel(unittest.TestCase):
         with self.assertRaises(ConnectionError) as context:
             download_model(self.source, self.output_dir, self.credentials)
 
-        self.assertIn(
-            "Failed to establish connection to ModelScope server", str(context.exception)
-        )
+        self.assertIn("Failed to establish connection to ModelScope server", str(context.exception))
         mock_get_downloader.assert_called_once_with(self.source, self.credentials, 8)
 
     @patch("kthena.downloader.downloader.get_downloader")
@@ -79,15 +75,11 @@ class TestDownloadModel(unittest.TestCase):
         )
         if isinstance(downloader, ModelScopeDownloader):
             self.assertEqual(
-                downloader.model_uri, "Qwen/Qwen2.5-7B-Instruct",
-                "model_uri should have ms:// prefix removed"
+                downloader.model_uri, "Qwen/Qwen2.5-7B-Instruct", "model_uri should have ms:// prefix removed"
             )
 
     def test_get_downloader_modelscope_with_revision(self):
-        credentials_with_revision = {
-            "ms_token": "fake-token",
-            "ms_revision": "v1.0.0"
-        }
+        credentials_with_revision = {"ms_token": "fake-token", "ms_revision": "v1.0.0"}
         downloader = get_downloader(self.source, credentials_with_revision)
         self.assertIsInstance(
             downloader,
@@ -95,20 +87,13 @@ class TestDownloadModel(unittest.TestCase):
             "Should return ModelScopeDownloader instance",
         )
         if isinstance(downloader, ModelScopeDownloader):
-            self.assertEqual(
-                downloader.ms_revision,
-                "v1.0.0",
-                "ms_revision should be passed correctly"
-            )
+            self.assertEqual(downloader.ms_revision, "v1.0.0", "ms_revision should be passed correctly")
 
     @patch("kthena.downloader.modelscope_downloader.snapshot_download")
     def test_download_passes_token_to_snapshot_download(self, mock_snapshot_download):
         """Verify that ms_token is correctly passed to snapshot_download"""
         mock_snapshot_download.return_value = None
-        downloader = ModelScopeDownloader(
-            model_uri="Qwen/Qwen2.5-7B-Instruct",
-            ms_token="test-token-123"
-        )
+        downloader = ModelScopeDownloader(model_uri="Qwen/Qwen2.5-7B-Instruct", ms_token="test-token-123")
         downloader.download("/tmp/output")
 
         mock_snapshot_download.assert_called_once_with(
@@ -116,7 +101,8 @@ class TestDownloadModel(unittest.TestCase):
             revision=None,
             local_dir="/tmp/output",
             local_files_only=False,
-            token="test-token-123"
+            token="test-token-123",
+            max_workers=8,
         )
 
     @patch("kthena.downloader.modelscope_downloader.snapshot_download")
@@ -124,9 +110,7 @@ class TestDownloadModel(unittest.TestCase):
         """Verify that all parameters are correctly passed to snapshot_download"""
         mock_snapshot_download.return_value = None
         downloader = ModelScopeDownloader(
-            model_uri="Qwen/Qwen2.5-7B-Instruct",
-            ms_revision="v1.0.0",
-            ms_token="test-token"
+            model_uri="Qwen/Qwen2.5-7B-Instruct", ms_revision="v1.0.0", ms_token="test-token", max_workers=4
         )
         downloader.download("/tmp/output")
 
@@ -135,8 +119,31 @@ class TestDownloadModel(unittest.TestCase):
             revision="v1.0.0",
             local_dir="/tmp/output",
             local_files_only=False,
-            token="test-token"
+            token="test-token",
+            max_workers=4,
         )
+
+    def test_get_downloader_modelscope_default_workers(self):
+        """Verify that default max_workers (8) is passed to ModelScopeDownloader"""
+        downloader = get_downloader(self.source, self.credentials)
+        self.assertIsInstance(
+            downloader,
+            ModelScopeDownloader,
+            "Should return ModelScopeDownloader instance",
+        )
+        if isinstance(downloader, ModelScopeDownloader):
+            self.assertEqual(downloader.max_workers, 8, "max_workers should default to 8")
+
+    def test_get_downloader_modelscope_custom_workers(self):
+        """Verify that custom max_workers is passed to ModelScopeDownloader"""
+        downloader = get_downloader(self.source, self.credentials, max_workers=16)
+        self.assertIsInstance(
+            downloader,
+            ModelScopeDownloader,
+            "Should return ModelScopeDownloader instance",
+        )
+        if isinstance(downloader, ModelScopeDownloader):
+            self.assertEqual(downloader.max_workers, 16, "max_workers should be 16")
 
 
 if __name__ == "__main__":

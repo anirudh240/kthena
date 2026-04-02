@@ -21,11 +21,12 @@ logger = setup_logger()
 
 
 class ModelScopeDownloader(ModelDownloader):
-    def __init__(self, model_uri: str, ms_revision: str = None, ms_token: str = None):
+    def __init__(self, model_uri: str, ms_revision: str = None, ms_token: str = None, max_workers: int = 8):
         super().__init__()
         self.model_uri = model_uri
         self.ms_revision = ms_revision
         self.ms_token = ms_token
+        self.max_workers = max_workers
 
     def download(self, output_dir: str):
         logger.info(f"Downloading model from ModelScope: {self.model_uri}")
@@ -35,7 +36,8 @@ class ModelScopeDownloader(ModelDownloader):
                 revision=self.ms_revision,
                 local_dir=output_dir,
                 local_files_only=False,
-                token=self.ms_token
+                token=self.ms_token,
+                max_workers=self.max_workers,
             )
         except Exception as e:
             logger.error(f"Error downloading model '{self.model_uri}': {e}")
